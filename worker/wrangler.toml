@@ -1,0 +1,19 @@
+name = "sakkol-relay"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+# workers.dev only: no custom-domain Cloudflare products (Bot Management, WAF challenges) are enabled.
+
+[vars]
+FRONTEND_ORIGIN = "https://sakkol.github.io"
+FRONTEND_URL = "https://sakkol.github.io/workspace/"
+REDIRECT_URI = "https://sakkol-relay.serdarakkol.workers.dev/oauth/google/callback"
+GOOGLE_CLIENT_ID = "925607426246-n4mjhuvrk0muauunnp56jepbeitu1com.apps.googleusercontent.com"
+# GOOGLE_CLIENT_SECRET is set with: npx wrangler secret put GOOGLE_CLIENT_SECRET
+
+[[durable_objects.bindings]]
+name = "STORE"
+class_name = "Store"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Store"]
