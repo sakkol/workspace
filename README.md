@@ -1,141 +1,38 @@
-# Sakkol Workspace v1 (Gmail read-only)
+# Sakkol Workspace (v2)
 
-This repository contains the **Sakkol Workspace** frontend and its Cloudflare relay.
+Unlock your apps on an **untrusted shared computer** using your **trusted phone**. Your Google/Spotify password is never typed on the shared computer, and no login credential is stored in the shared browser.
 
-The frontend is kept in its own GitHub repository named **`workspace`** and is deployed as a GitHub Pages project site at:
+| App | v2 status |
+|---|---|
+| Gmail | read-only **or** read & write (send, reply, star, archive, trash) |
+| Spotify | search + remote control of playback on your own devices |
+| Google Drive, Notion | "coming soon" tiles (no backend yet) |
 
-**https://sakkol.github.io/workspace/**
+**Start here:** [`SETUP-STEPS.md`](SETUP-STEPS.md) (deploy + Google/Spotify/Cloudflare/GitHub configuration, all phases).
+Then: [`docs/SECURITY.md`](docs/SECURITY.md) · [`docs/API.md`](docs/API.md) · [`docs/SECURITY-REVIEW-v1.md`](docs/SECURITY-REVIEW-v1.md).
 
-The main Sakkol website remains in the separate `sakkol.github.io` repository. The two repositories do not need to be merged.
+## How it works
 
-## Repository layout
+1. On the shared computer you tap **Unlock Gmail** (or Spotify). It shows a QR code and a 6-digit code.
+2. On your phone you scan the QR, see *what* is being unlocked and *where the request came from*, and **type** the 6-digit code.
+3. The phone goes to Google's / Spotify's own consent page. The Relay (a Cloudflare Worker) receives the token. **The token never reaches the shared browser.**
+4. The shared browser claims a random, short-lived **capability** (held only in JavaScript memory, one per app) and uses it against the Relay.
+5. **DONE** (or a timer, or a page refresh) ends the session. The Relay enforces expiry itself.
 
-- `web/` — static Vite frontend deployed to GitHub Pages
-- `worker/` — Cloudflare Worker + Durable Object relay
-- `.github/workflows/deploy.yml` — GitHub Pages deployment workflow
+## Layout
 
-## 1. Google Cloud
+```
+web/      static frontend (TypeScript + Vite)  -> GitHub Pages
+worker/   Cloudflare Worker "Relay" + Durable Object -> workers.dev
+docs/     API, security architecture, v1 review
+SETUP-STEPS.md
+```
 
-1. Open Google Cloud Console and create/select a project.
-2. Enable the **Gmail API**.
-3. Configure the OAuth consent screen (Google Auth Platform).
-4. Add only the scope:
-   `https://www.googleapis.com/auth/gmail.readonly`
-5. If the app is in Testing mode, add your Gmail address as a Test user.
-6. Create an OAuth client ID for a **Web application**.
-7. Set this exact authorized redirect URI:
+Adding an app later (Drive, Notion): one entry in `worker/src/apps.ts`, a vendor in `worker/src/vendors.ts` if it is a new OAuth provider, a route file, and a tile in `web/src/apps/registry.ts`.
 
-   `https://sakkol-relay.YOUR-WORKERS-SUBDOMAIN.workers.dev/oauth/google/callback`
-
-8. Keep the client secret private.
-
-## 2. Cloudflare Relay
-
-From `worker/`:
+## Commands
 
 ```bash
-npm install
-npx wrangler login
+cd worker && npm ci && npm test && npm run typecheck   # unit + router tests
+cd web    && npm ci && npm test && npm run build       # needs VITE_RELAY_URL for the build
 ```
-
-Edit `worker/wrangler.toml`:
-
-- `FRONTEND_ORIGIN` is already set to `https://sakkol.github.io`
-- `FRONTEND_URL` is already set to `https://sakkol.github.io/workspace/`
-- replace `YOUR-WORKERS-SUBDOMAIN`
-- replace `PASTE-CLIENT-ID.apps.googleusercontent.com`
-
-Set the secret:
-
-```bash
-npx wrangler secret put GOOGLE_CLIENT_SECRET
-```
-
-Then deploy:
-
-```bash
-npx wrangler deploy
-```
-
-The Worker URL must match the host used by `REDIRECT_URI`.
-
-## 3. GitHub Pages for `workspace`
-
-Push this repository as:
-
-`https://github.com/sakkol/workspace`
-
-In the repository:
-
-1. Go to **Settings → Pages**.
-2. Set the source to **GitHub Actions**.
-3. Go to **Settings → Secrets and variables → Actions → Variables**.
-4. Add a repository variable named `VITE_RELAY_URL`.
-5. Set it to the Worker URL, with **no trailing slash**.
-6. Push to `main`, or run the **Deploy frontend** workflow manually.
-
-The resulting site is:
-
-`https://sakkol.github.io/workspace/`
-
-### Why the frontend uses `base: "./"`
-
-`web/vite.config.ts` intentionally uses a relative Vite base:
-
-```ts
-export default defineConfig({ base: "./" });
-```
-
-That makes the generated frontend work under the project-site path `/workspace/` without hard-coding the repository path into the application. The app also uses hash routing (`#/p/...`), so the GitHub Pages project path does not require server-side rewrites.
-
-## 4. Main site integration
-
-Nothing needs to be copied into the `sakkol.github.io` repository.
-
-From the main website, link to:
-
-`/workspace/`
-
-or:
-
-`https://sakkol.github.io/workspace/`
-
-GitHub Pages will serve the `workspace` repository independently at that path because it is a project site belonging to the same GitHub Pages user site.
-
-## 5. Use it
-
-Open:
-
-`https://sakkol.github.io/workspace/`
-
-Then:
-
-1. The computer displays a QR code and six-digit confirmation code.
-2. Scan the QR code with the phone.
-3. Confirm that the code matches.
-4. Google OAuth opens on the phone.
-5. After authorization, the computer receives a short-lived capability and displays the Gmail inbox.
-6. Click **DONE / SIGN OUT** when finished.
-
-## 6. Security checklist
-
-- No credential is stored in `localStorage`, `sessionStorage`, IndexedDB, or cookies.
-- The Google access token remains server-side in the Durable Object.
-- The browser receives only a short-lived capability.
-- Sessions expire after 30 minutes maximum and 5 minutes of inactivity.
-- OAuth uses PKCE.
-- Gmail content is rendered as text, not injected as HTML.
-- The relay rejects requests from origins other than `https://sakkol.github.io`.
-- Never commit `GOOGLE_CLIENT_SECRET`.
-
-## 7. Important deployment detail
-
-The frontend repository is **`workspace`**, not `sakkol`.
-
-The public URLs are therefore:
-
-- Main site: `https://sakkol.github.io/`
-- Workspace: `https://sakkol.github.io/workspace/`
-- Relay: `https://sakkol-relay.YOUR-WORKERS-SUBDOMAIN.workers.dev/`
-
-The Google OAuth redirect URI is the Worker callback, not the GitHub Pages URL.

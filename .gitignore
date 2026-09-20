@@ -1,4 +1,9 @@
 node_modules
 dist
-.dev.vars
 .wrangler
+# secrets / local config: never commit
+.dev.vars
+.env
+.env.*
+!.env.example
+*.log

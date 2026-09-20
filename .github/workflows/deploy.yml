@@ -1,5 +1,7 @@
 name: Deploy workspace frontend
-on: { push: { branches: [main], paths: ["web/**"] }, workflow_dispatch: {} }
+on:
+  push: { branches: [main], paths: ["web/**"] }
+  workflow_dispatch: {}
 permissions: { contents: read, pages: write, id-token: write }
 jobs:
   build:
@@ -7,8 +9,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20 }
-      - run: npm install && npm run build
+        with: { node-version: 22, cache: npm, cache-dependency-path: web/package-lock.json }
+      - name: Require VITE_RELAY_URL (otherwise the page CSP would be broken)
+        run: test -n "$VITE_RELAY_URL" || (echo "Set the repository variable VITE_RELAY_URL (Settings > Secrets and variables > Actions > Variables)"; exit 1)
+        env: { VITE_RELAY_URL: "${{ vars.VITE_RELAY_URL }}" }
+      - run: npm ci
+        working-directory: web
+      - run: npm test && npm run build
         working-directory: web
         env: { VITE_RELAY_URL: "${{ vars.VITE_RELAY_URL }}" }
       - uses: actions/upload-pages-artifact@v3

@@ -1,19 +1,43 @@
 name = "sakkol-relay"
 main = "src/index.ts"
 compatibility_date = "2025-01-01"
-# workers.dev only: no custom-domain Cloudflare products (Bot Management, WAF challenges) are enabled.
+# workers.dev only: no custom-domain Cloudflare products (Bot Management, WAF challenges, Turnstile) are enabled,
+# so Cloudflare sets no __cf_bm / cf_clearance cookies on the shared browser. Re-check if you ever add any.
 
 [vars]
 FRONTEND_ORIGIN = "https://sakkol.github.io"
 FRONTEND_URL = "https://sakkol.github.io/workspace/"
-REDIRECT_URI = "https://sakkol-relay.serdarakkol.workers.dev/oauth/google/callback"
 GOOGLE_CLIENT_ID = "925607426246-n4mjhuvrk0muauunnp56jepbeitu1com.apps.googleusercontent.com"
-# GOOGLE_CLIENT_SECRET is set with: npx wrangler secret put GOOGLE_CLIENT_SECRET
+GOOGLE_REDIRECT_URI = "https://sakkol-relay.serdarakkol.workers.dev/oauth/google/callback"
+# Spotify is optional. Leave SPOTIFY_CLIENT_ID empty to deploy Gmail only; fill it in when you do SETUP-STEPS.md step 4.
+SPOTIFY_CLIENT_ID = ""
+SPOTIFY_REDIRECT_URI = "https://sakkol-relay.serdarakkol.workers.dev/oauth/spotify/callback"
+# Secrets (NEVER put these here). Set with `npx wrangler secret put NAME`:
+#   TOKEN_KEY, GOOGLE_CLIENT_SECRET, SPOTIFY_CLIENT_SECRET
 
 [[durable_objects.bindings]]
 name = "STORE"
 class_name = "Store"
 
+# Keep this block unchanged from v1. Renaming the class or editing the tag breaks deploys.
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Store"]
+
+# ---- Optional staging Worker (see SETUP-STEPS.md, "Staging") ----
+# Uncomment, fill in your computer's LAN IP, then: npx wrangler deploy --env staging
+# [env.staging]
+# name = "sakkol-relay-staging"
+# [env.staging.vars]
+# FRONTEND_ORIGIN = "http://192.168.1.50:5173"
+# FRONTEND_URL = "http://192.168.1.50:5173/"
+# GOOGLE_CLIENT_ID = "STAGING-CLIENT-ID.apps.googleusercontent.com"
+# GOOGLE_REDIRECT_URI = "https://sakkol-relay-staging.serdarakkol.workers.dev/oauth/google/callback"
+# SPOTIFY_CLIENT_ID = ""
+# SPOTIFY_REDIRECT_URI = "https://sakkol-relay-staging.serdarakkol.workers.dev/oauth/spotify/callback"
+# [[env.staging.durable_objects.bindings]]
+# name = "STORE"
+# class_name = "Store"
+# [[env.staging.migrations]]
+# tag = "v1"
+# new_sqlite_classes = ["Store"]
