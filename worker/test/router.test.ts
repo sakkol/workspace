@@ -36,6 +36,14 @@ beforeEach(() => {
       return Response.json({ access_token: SECRET_TOKEN, expires_in: 3600, scope: grantedScope, token_type: "Bearer" });
     if (u.endsWith("/labels/INBOX")) return Response.json({ messagesUnread: 3, messagesTotal: 10 });
     if (u.endsWith("/messages/send")) return Response.json({ id: "sent1" });
+    if (u.includes("/threads?")) return Response.json({ threads: [{ id: "t1" }], nextPageToken: null });
+    if (u.includes("/threads/t1?format=metadata")) return Response.json({ id: "t1", snippet: "thanks!", messages: [
+      { id: "m1", labelIds: ["INBOX", "UNREAD"], payload: { headers: [{ name: "From", value: '"Ada L" <ada@x.com>' }, { name: "Subject", value: "Plans" }, { name: "Date", value: "Mon, 1 Jan 2026 10:00:00 +0000" }] } },
+      { id: "m2", labelIds: ["SENT"], payload: { headers: [{ name: "From", value: "me@x.com" }, { name: "Subject", value: "Re: Plans" }, { name: "Date", value: "Mon, 1 Jan 2026 11:00:00 +0000" }] } }] });
+    if (u.includes("/threads/t1?format=full")) return Response.json({ id: "t1", messages: [
+      { id: "m1", labelIds: ["INBOX"], payload: { mimeType: "text/plain", body: { data: btoa("hello") }, headers: [{ name: "From", value: "Ada <ada@x.com>" }, { name: "Subject", value: "Plans" }, { name: "To", value: "Me <me@x.com>, bob@y.com" }] } },
+      { id: "m2", labelIds: ["SENT"], payload: { mimeType: "text/plain", body: { data: btoa("sure") }, headers: [{ name: "From", value: "me@x.com" }, { name: "To", value: "Ada <ada@x.com>" }] } }] });
+    if (u.endsWith("/threads/t1/modify") || u.endsWith("/threads/t1/trash")) return Response.json({});
     return new Response("{}", { status: 404 });
   });
 });
@@ -202,6 +210,39 @@ describe("router", () => {
     const u = await unlock("write");
     const { cap } = await (await u.claim()).json() as any;
     expect((await post("/gmail/send", ["array"], bearer(cap))).status).toBe(400);
+  });
+
+  it("lists conversations per tab (Promotions = INBOX + CATEGORY_PROMOTIONS) and summarises threads", async () => {
+    const u = await unlock("read");
+    const { cap } = await (await u.claim()).json() as any;
+    const r = await call("/gmail/threads?label=PROMOTIONS", { headers: bearer(cap) });
+    const j = await r.json() as any;
+    const listCall = calls.find((c) => c.url.includes("/threads?"))!;
+    expect(new URL(listCall.url).searchParams.getAll("labelIds")).toEqual(["INBOX", "CATEGORY_PROMOTIONS"]);
+    expect(j.threads[0]).toMatchObject({ id: "t1", subject: "Plans", count: 2, unread: true, senders: ["Ada L", "me"] });
+    expect((await call("/gmail/threads?label=BOGUS", { headers: bearer(cap) })).status).toBe(400);
+    expect((await call("/gmail/threads?label=constructor", { headers: bearer(cap) })).status).toBe(400);
+  });
+
+  it("returns a whole conversation with sent flags and parsed recipients", async () => {
+    const u = await unlock("read");
+    const { cap } = await (await u.claim()).json() as any;
+    const j = await (await call("/gmail/threads/t1", { headers: bearer(cap) })).json() as any;
+    expect(j.count).toBe(2);
+    expect(j.messages.map((m: any) => m.text)).toEqual(["hello", "sure"]);
+    expect(j.messages[0]).toMatchObject({ fromAddr: "ada@x.com", toAddrs: ["me@x.com", "bob@y.com"], sent: false });
+    expect(j.messages[1].sent).toBe(true);
+  });
+
+  it("thread actions need a write session and use the same whitelist", async () => {
+    const ro = await unlock("read");
+    const roCap = (await (await ro.claim()).json() as any).cap;
+    expect((await post("/gmail/threads/t1/action", { action: "archive" }, bearer(roCap))).status).toBe(403);
+    const rw = await unlock("write");
+    const cap = (await (await rw.claim()).json() as any).cap;
+    expect((await post("/gmail/threads/t1/action", { action: "archive" }, bearer(cap))).status).toBe(200);
+    expect((await post("/gmail/threads/t1/action", { action: "delete" }, bearer(cap))).status).toBe(400);
+    expect((await post("/gmail/threads/t1/trash", undefined, bearer(cap))).status).toBe(200);
   });
 
   it("fails closed without TOKEN_KEY", async () => {

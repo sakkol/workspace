@@ -34,7 +34,7 @@ export function composeView(sh: Shell, init: Draft = { to: "", cc: "", subject: 
       try {
         await post("gmail", "/gmail/send", { to: T, cc: C, subject: d.subject, body: d.body, replyToId: d.replyToId });
         sh.toast("Message sent");
-        S.msgs = []; S.next = null;
+        S.threads = []; S.next = null;
         sh.showList();
       } catch (e) {
         send.disabled = false;

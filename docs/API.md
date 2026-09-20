@@ -31,10 +31,11 @@ Errors look like `{ "error": "code" }`.
 | Path | Access | Notes |
 |---|---|---|
 | `GET /gmail/profile` | read | `{unread,total,access,ttlMs}` |
-| `GET /gmail/messages?label=&q=&pageToken=` | read | `label` ∈ INBOX STARRED SENT TRASH ALL; 25 per page |
-| `GET /gmail/messages/:id` | read | Plain text only |
-| `POST /gmail/messages/:id/action` `{action}` | write | `read` `unread` `star` `unstar` `archive` |
-| `POST /gmail/messages/:id/trash` / `untrash` | write | No permanent delete exists |
+| `GET /gmail/threads?label=&q=&pageToken=` | read | One row per **conversation**. `label` ∈ INBOX (Primary) PROMOTIONS UPDATES STARRED SENT TRASH ALL; 25 per page. Tabs use Gmail's `CATEGORY_*` labels, so Gmail's inbox tabs must be enabled. Returns `{threads:[{id,subject,senders[],count,date,snippet,unread,starred}], nextPageToken}` |
+| `GET /gmail/threads/:id` | read | Whole conversation, oldest first (last 30 messages): `{id,subject,count,truncated,messages:[{id,from,fromAddr,replyTo,to,toAddrs,cc,date,unread,starred,sent,text}]}`. Plain text only |
+| `GET /gmail/messages/:id` | read | One message, plain text only |
+| `POST /gmail/(messages\|threads)/:id/action` `{action}` | write | `read` `unread` `star` `unstar` `archive`. On a thread it applies to every message in it |
+| `POST /gmail/(messages\|threads)/:id/trash` / `untrash` | write | No permanent delete exists |
 | `POST /gmail/send` `{to[],cc[],subject,body,replyToId?}` | write | Max 10 recipients, 150-char subject, 50 000-char body, **10 sends per session**. MIME is built by the Relay. No Bcc, attachments, forwarding. |
 
 ## Spotify (Bearer capability of app `spotify`)

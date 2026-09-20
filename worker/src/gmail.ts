@@ -3,7 +3,14 @@ import { HttpErr, Bad } from "./errors";
 import { buildRaw, parseOutgoing } from "./mime";
 
 const ID = /^[\w-]{1,64}$/;
-const LABELS = new Set(["INBOX", "STARRED", "SENT", "TRASH", "ALL"]);
+// Tabs: Inbox = Primary. Gmail combines several labelIds with AND.
+const LABEL_IDS: Record<string, string[]> = {
+  INBOX: ["INBOX", "CATEGORY_PERSONAL"],
+  PROMOTIONS: ["INBOX", "CATEGORY_PROMOTIONS"],
+  UPDATES: ["INBOX", "CATEGORY_UPDATES"],
+  STARRED: ["STARRED"], SENT: ["SENT"], TRASH: ["TRASH"], ALL: [],
+};
+const MAX_THREAD_MSGS = 30;
 const ACTIONS: Record<string, { addLabelIds?: string[]; removeLabelIds?: string[] }> = {
   read: { removeLabelIds: ["UNREAD"] },
   unread: { addLabelIds: ["UNREAD"] },
@@ -34,20 +41,20 @@ const dec = (d: string) => {
 };
 
 /** Plain text only. HTML mail is reduced to text and is never returned as HTML. */
-export function bodyText(payload: any): string {
+export function bodyText(payload: any, max = 200_000): string {
   const parts: any[] = [];
   const walk = (x: any) => { parts.push(x); (x.parts || []).forEach(walk); };
   walk(payload);
   const usable = (mt: string) => parts.find((x) => x.mimeType === mt && x.body?.data && !x.filename);
   const plain = usable("text/plain");
-  if (plain) return dec(plain.body.data).slice(0, 200_000);
+  if (plain) return dec(plain.body.data).slice(0, max);
   const html = usable("text/html");
   if (!html) return "(no readable text content)";
   return dec(html.body.data)
     .replace(/<(script|style)[\s\S]*?<\/\1>/gi, "")
     .replace(/<(br|\/p|\/div|\/tr|\/li)[^>]*>/gi, "\n")
     .replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/\n{3,}/g, "\n\n").trim().slice(0, 200_000);
+    .replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/\n{3,}/g, "\n\n").trim().slice(0, max);
 }
 
 const summary = (g: any) => ({
@@ -55,6 +62,28 @@ const summary = (g: any) => ({
   from: hdr(g, "from"), subject: hdr(g, "subject"), date: hdr(g, "date"), snippet: (g.snippet ?? "") as string,
   unread: (g.labelIds || []).includes("UNREAD"), starred: (g.labelIds || []).includes("STARRED"),
 });
+
+const nameOf = (s: string) => {
+  const m = /^\s*"?([^"<]*?)"?\s*<[^>]+>\s*$/.exec(s);
+  return (m?.[1] ?? "").trim() || addrOf(s);
+};
+const addrList = (s: string) => s.match(/[^\s<>,;"']+@[^\s<>,;"']+/g) ?? [];
+
+/** One row of the conversation list. */
+function threadSummary(t: any) {
+  const ms: any[] = t.messages || [];
+  const first = ms[0] ?? {}, last = ms[ms.length - 1] ?? {};
+  const senders: string[] = [];
+  for (const m of ms) {
+    const n = (m.labelIds || []).includes("SENT") ? "me" : nameOf(hdr(m, "from"));
+    if (n && !senders.includes(n)) senders.push(n);
+  }
+  return {
+    id: t.id as string, subject: hdr(first, "subject"), senders: senders.slice(0, 4), count: ms.length,
+    date: hdr(last, "date"), snippet: (t.snippet ?? last.snippet ?? "") as string,
+    unread: ms.some((m) => (m.labelIds || []).includes("UNREAD")), starred: ms.some((m) => (m.labelIds || []).includes("STARRED")),
+  };
+}
 
 export async function handleGmail(c: RouteCtx): Promise<Response> {
   const { p, req, u, J, store, bearer } = c;
@@ -70,26 +99,46 @@ export async function handleGmail(c: RouteCtx): Promise<Response> {
     return J({ unread: l.messagesUnread ?? 0, total: l.messagesTotal ?? 0, access: s.access, ttlMs: s.ttlMs });
   }
 
-  if (p === "/gmail/messages" && req.method === "GET") {
+  // Conversation list (one row per thread). label = a tab or folder.
+  if (p === "/gmail/threads" && req.method === "GET") {
     const label = u.searchParams.get("label") || "INBOX";
-    if (!LABELS.has(label)) throw new Bad("bad_label");
+    if (!Object.hasOwn(LABEL_IDS, label)) throw new Bad("bad_label");
     const q = u.searchParams.get("q") || "";
     if (q.length > 200) throw new Bad("query_too_long");
     const pt = u.searchParams.get("pageToken") || "";
     if (pt && !/^[\w-]{1,300}$/.test(pt)) throw new Bad("bad_page");
     const qs = new URLSearchParams({ maxResults: "25" });
-    if (label !== "ALL") qs.set("labelIds", label);
+    for (const id of LABEL_IDS[label]) qs.append("labelIds", id);
     if (label === "TRASH") qs.set("includeSpamTrash", "true");
     if (q) qs.set("q", q);
     if (pt) qs.set("pageToken", pt);
-    const l = await gmail(token, "messages?" + qs);
-    const got = await Promise.allSettled((l.messages || []).map((x: any) =>
-      gmail(token, `messages/${x.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`)));
-    const messages = got.flatMap((r) => (r.status === "fulfilled" ? [summary(r.value)] : []));
+    const l = await gmail(token, "threads?" + qs);
+    const got = await Promise.allSettled((l.threads || []).map((x: any) =>
+      gmail(token, `threads/${x.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`)));
+    const threads = got.flatMap((r) => (r.status === "fulfilled" ? [threadSummary(r.value)] : []));
     // A dead token makes every sub-request fail with 401; surface that instead of an empty inbox.
-    const dead = got.find((r) => r.status === "rejected" && (r as PromiseRejectedResult).reason instanceof HttpErr && (r as any).reason.status === 401);
-    if (dead) throw new HttpErr(401, "session_expired");
-    return J({ messages, nextPageToken: l.nextPageToken ?? null });
+    if (got.some((r) => r.status === "rejected" && (r as PromiseRejectedResult).reason instanceof HttpErr && (r as any).reason.status === 401)) throw new HttpErr(401, "session_expired");
+    return J({ threads, nextPageToken: l.nextPageToken ?? null });
+  }
+
+  // One whole conversation, oldest first (the last MAX_THREAD_MSGS messages).
+  if ((m = p.match(/^\/gmail\/threads\/([\w-]+)$/)) && req.method === "GET") {
+    if (!ID.test(m[1])) throw new Bad("bad_id");
+    const t = await gmail(token, `threads/${m[1]}?format=full`);
+    const all: any[] = t.messages || [];
+    const shown = all.slice(-MAX_THREAD_MSGS);
+    return J({
+      id: t.id, subject: hdr(all[0] ?? {}, "subject"), count: all.length, truncated: all.length > shown.length,
+      messages: shown.map((g) => {
+        const labels: string[] = g.labelIds || [], from = hdr(g, "from");
+        return {
+          id: g.id, from, fromAddr: addrOf(from), replyTo: addrOf(hdr(g, "reply-to") || from),
+          to: hdr(g, "to"), toAddrs: addrList(hdr(g, "to")), cc: hdr(g, "cc"), date: hdr(g, "date"),
+          unread: labels.includes("UNREAD"), starred: labels.includes("STARRED"), sent: labels.includes("SENT"),
+          text: bodyText(g.payload, 60_000),
+        };
+      }),
+    });
   }
 
   if ((m = p.match(/^\/gmail\/messages\/([\w-]+)$/)) && req.method === "GET") {
@@ -102,16 +151,18 @@ export async function handleGmail(c: RouteCtx): Promise<Response> {
     });
   }
 
-  if ((m = p.match(/^\/gmail\/messages\/([\w-]+)\/(action|trash|untrash)$/)) && req.method === "POST") {
+  // Write actions work on a single message or a whole conversation (same whitelist, same limits).
+  if ((m = p.match(/^\/gmail\/(messages|threads)\/([\w-]+)\/(action|trash|untrash)$/)) && req.method === "POST") {
     needWrite();
     if (!(await c.lim("gmail-write", 60))) return J({ error: "rate_limited" }, 429);
-    if (!ID.test(m[1])) throw new Bad("bad_id");
-    if (m[2] === "action") {
+    const [, kind, id, op] = m;
+    if (!ID.test(id)) throw new Bad("bad_id");
+    if (op === "action") {
       const a = (await c.json()).action;
       if (typeof a !== "string" || !Object.hasOwn(ACTIONS, a)) throw new Bad("bad_action");
-      await gmail(token, `messages/${m[1]}/modify`, { method: "POST", body: ACTIONS[a] });
+      await gmail(token, `${kind}/${id}/modify`, { method: "POST", body: ACTIONS[a] });
     } else {
-      await gmail(token, `messages/${m[1]}/${m[2]}`, { method: "POST" }); // trash / untrash. There is NO permanent delete.
+      await gmail(token, `${kind}/${id}/${op}`, { method: "POST" }); // trash / untrash. There is NO permanent delete.
     }
     return J({ ok: true });
   }

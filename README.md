@@ -9,6 +9,7 @@ Unlock your apps on an **untrusted shared computer** using your **trusted phone*
 | Google Drive, Notion | "coming soon" tiles (no backend yet) |
 
 **Start here:** [`SETUP-STEPS.md`](SETUP-STEPS.md) (deploy + Google/Spotify/Cloudflare/GitHub configuration, all phases).
+Next versions (for an AI agent): [`docs/NEXT-STEPS-FOR-AI-AGENT.md`](docs/NEXT-STEPS-FOR-AI-AGENT.md).
 Then: [`docs/SECURITY.md`](docs/SECURITY.md) · [`docs/API.md`](docs/API.md) · [`docs/SECURITY-REVIEW-v1.md`](docs/SECURITY-REVIEW-v1.md).
 
 ## How it works
