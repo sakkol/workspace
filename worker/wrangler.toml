@@ -10,7 +10,7 @@ FRONTEND_URL = "https://sakkol.github.io/workspace/"
 GOOGLE_CLIENT_ID = "925607426246-n4mjhuvrk0muauunnp56jepbeitu1com.apps.googleusercontent.com"
 GOOGLE_REDIRECT_URI = "https://sakkol-relay.serdarakkol.workers.dev/oauth/google/callback"
 # Spotify is optional. Leave SPOTIFY_CLIENT_ID empty to deploy Gmail only; fill it in when you do SETUP-STEPS.md step 4.
-SPOTIFY_CLIENT_ID = ""
+SPOTIFY_CLIENT_ID = "e669c61d78b84debb8612becc42cb64c"
 SPOTIFY_REDIRECT_URI = "https://sakkol-relay.serdarakkol.workers.dev/oauth/spotify/callback"
 # Secrets (NEVER put these here). Set with `npx wrangler secret put NAME`:
 #   TOKEN_KEY, GOOGLE_CLIENT_SECRET, SPOTIFY_CLIENT_SECRET
