@@ -2,6 +2,9 @@ import { h, mmss, set } from "./core/dom";
 import { lockAll, lockApp } from "./core/api";
 import { caps, every, go, rerender, takeNotice, AppId, Access } from "./core/state";
 import { TILES } from "./apps/registry";
+import { clockWidget } from "./widgets/clock";
+import { timerWidget } from "./widgets/timer";
+import { linksWidget } from "./widgets/links";
 
 // The Spotify web player lives on its OWN site (different origin) because it loads Spotify's script. The workspace only
 // opens it in a new tab: no token, capability or message ever passes between the two sites.
@@ -57,7 +60,9 @@ export function launcher(root: HTMLElement) {
     notice ? h("p", { cls: "notice", role: "status" }, notice) : null,
     h("div", { cls: "bar" }, h("div", {}, h("strong", {}, "Your workspace"), h("div", { cls: "mut small" }, "Unlock an app with your phone.")),
       caps.size ? h("button", { cls: "done", onclick: async () => { await lockAll(); rerender(); } }, "DONE — lock everything") : null),
+    h("div", { cls: "widgets" }, clockWidget(), timerWidget()),
     h("div", { cls: "grid" }, ...tiles),
+    linksWidget(),
     h("p", { cls: "mut small" }, "Nothing is saved on this computer. Refreshing or closing this page locks everything. Use “Read only” on computers you trust least."));
   every(() => timers.forEach((f) => f()), 1000);
 }

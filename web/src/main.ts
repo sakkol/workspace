@@ -5,6 +5,7 @@ import { launcher } from "./launcher";
 import { unlockView } from "./link/computer";
 import { phoneView } from "./link/phone";
 import { MOUNT } from "./apps/registry";
+import { timerChip } from "./widgets/timer";
 
 // This page must never be shown inside another site (GitHub Pages cannot send frame-ancestors headers).
 if (window.top !== window.self) {
@@ -18,7 +19,7 @@ function render() {
   resetView();
   const body = h("section");
   root.className = view.n === "app" ? "wide" : "";
-  root.replaceChildren(h("h1", { cls: "brand" }, "Sakkol"), body);
+  root.replaceChildren(h("div", { cls: "head" }, h("h1", { cls: "brand" }, "Sakkol"), timerChip()), body);
   switch (view.n) {
     case "launcher": return launcher(body);
     case "unlock": return void unlockView(body, view.app, view.access);
