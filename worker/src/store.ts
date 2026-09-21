@@ -33,6 +33,7 @@ export class Store extends DurableObject<Env> {
   fail(id: string) { return this.core.fail(id); }
   cancel(id: string, secret?: string) { return this.core.cancel(id, secret); }
   claim(id: string, secret: string) { return this.core.claim(id, secret); }
+  claimToken(id: string, secret: string) { return this.core.claimToken(id, secret); }
   auth(cap: string, app: AppId, touch = true) { return this.core.auth(cap, app, touch); }
   revoke(cap: string) { return this.core.revoke(cap); }
   sendSlot(cap: string) { return this.core.sendSlot(cap); }

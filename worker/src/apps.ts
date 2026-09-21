@@ -2,7 +2,9 @@
 // vendors.ts if needed, add a route file, and add a tile in the frontend registry.
 
 export type AppId = "gmail" | "spotify";
-export type Access = "read" | "write";
+// "stream" = Spotify Web Playback SDK in the isolated player site: the browser receives a short-lived token ONCE at claim
+// (no Relay session, no capability). Only the player origin may start/claim it.
+export type Access = "read" | "write" | "stream";
 export type VendorId = "google" | "spotify";
 
 export interface AppDef {
@@ -38,9 +40,12 @@ export const APPS: Record<AppId, AppDef> = {
     label: "Spotify",
     scopes: {
       write: "user-read-playback-state user-read-currently-playing user-modify-playback-state",
+      // The Web Playback SDK requires streaming + user-read-email + user-read-private.
+      stream: "streaming user-read-email user-read-private user-read-playback-state user-modify-playback-state",
     },
     describe: {
       write: "See what is playing and control playback on your Spotify devices. Cannot see your email or payment details.",
+      stream: "Play music in a browser tab (Spotify web player). That tab receives a Spotify access token valid for about an hour that cannot be revoked early, and it can read your Spotify email address and country.",
     },
     maxLifeMs: 45 * 60_000, // Spotify access tokens last ~60 min
     idleMs: 15 * 60_000,
@@ -48,6 +53,6 @@ export const APPS: Record<AppId, AppDef> = {
 };
 
 export const isApp = (x: unknown): x is AppId => typeof x === "string" && Object.hasOwn(APPS, x);
-export const isAccess = (x: unknown): x is Access => x === "read" || x === "write";
+export const isAccess = (x: unknown): x is Access => x === "read" || x === "write" || x === "stream";
 export const scopesFor = (app: AppId, access: Access) => APPS[app].scopes[access] ?? "";
 export const scopeList = (s: string) => s.split(/[ ,]+/).filter(Boolean);

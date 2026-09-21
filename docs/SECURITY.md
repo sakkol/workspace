@@ -60,3 +60,41 @@ Plain `workers.dev` Worker + one Durable Object. No Bot Management, WAF challeng
 
 ## Assumptions not fixed by the spec
 Gmail caps (10 sends, 10 recipients, 50 KB body) and Spotify limits (45 min / 15 min idle) are my defaults; Read only is the default access level; `GET /health` exposes booleans about configuration; Spotify token exchange sends a client secret and a PKCE verifier together (if Spotify rejects that, remove `code_verifier` for Spotify only in `vendors.ts`).
+
+
+---
+
+# v2.1 addendum: Spotify web player (in-tab)
+
+**Exception E1 (owner-approved, this feature only):** a Spotify access token (about 1 hour) is delivered to the browser, because Spotify's Web Playback SDK needs it there. Everything else in this document still applies.
+
+## Design
+- The player is a **separate site on a separate origin** (a free GitHub organization Pages site). It loads Spotify's script; the workspace (which holds Gmail capabilities) never does. The workspace only opens the player in a new tab with `noopener,noreferrer`. **No token, capability or message passes between the two sites.**
+- The player runs the same link flow (claim secret, typed code, 3 tries) for `spotify` with access level `stream`.
+- **The Relay keeps nothing for a web-player unlock:** at claim the token is returned once to the holder of the claim secret and deleted; no session, no capability, no refresh token, no account information (the Relay never calls Spotify's profile endpoint). The token exists on the Relay only sealed (AES-GCM) and only during the 2.5 minute transaction.
+- **Origin rules enforced by the Relay:** only `PLAYER_ORIGIN` may start or claim a `stream` transaction; the workspace origin may start everything else but can never claim a stream token; the player origin may only call `/link/*` (Gmail, Spotify remote control and session revoke are workspace-only). The Relay refuses the player entirely if `PLAYER_ORIGIN` equals `FRONTEND_ORIGIN` (`player_not_isolated`) or is unset (`player_not_configured`).
+- Phone is redirected back to the site that showed the QR (the player).
+- Spotify's script is loaded **after** unlock only, never on the QR or phone pages.
+
+## Player controls
+- CSP (meta): `script-src 'self' https://sdk.scdn.co`; `connect-src` only the Relay and Spotify hosts (a compromised script has nowhere else to send data); images only from Spotify's CDN. `style-src` allows inline styles because Spotify's script injects some.
+- Token in memory; optional `sessionStorage` mirror (off by default; only if the user ticks "Keep me unlocked"); cleared on lock, expiry and when Spotify rejects it. Never localStorage, cookies or IndexedDB by this code.
+- Auto-lock: token expiry, 30 minutes without click/key (client-side), or the DONE button. DRM (Widevine) is checked before Spotify's script is loaded.
+- Frame-buster (GitHub Pages cannot send `frame-ancestors`).
+
+## New residual risks (accepted)
+- Spotify's script is third-party code running in the player tab. Isolation limits what it can reach (no Gmail, no workspace state) and the CSP limits exfiltration, but it can see the token and the tab. The SDK cannot be pinned with SRI.
+- The token cannot be revoked before it expires (no Spotify revoke endpoint); DONE only forgets it locally.
+- The token can read the account's email and country (SDK-required scopes).
+- Client-side auto-lock is a UX guard: the Relay cannot enforce it because the token, once delivered, is valid at Spotify for its whole life.
+- Reopening a closed tab may restore `sessionStorage` if "Keep me unlocked" was ticked.
+- The Web Playback SDK may keep its own data in the player origin's storage; check devtools > Application after use.
+
+## Manual checklist additions
+- [ ] Workspace build output contains no `sdk.scdn.co` (grep `web/dist`)
+- [ ] Workspace tab has no reference to the token (devtools > Network on the workspace while unlocking the player)
+- [ ] `POST /link/start` with `access:"stream"` from the workspace origin returns 403; from the player origin with `app:"gmail"` returns 403
+- [ ] `/link/claim` for a stream transaction from the workspace origin returns 409
+- [ ] After DONE, player-origin sessionStorage is empty
+- [ ] `wrangler tail` shows no token/refresh token
+- [ ] `/health` shows `"player":true` only when PLAYER_ORIGIN differs from FRONTEND_ORIGIN

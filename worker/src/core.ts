@@ -90,7 +90,7 @@ export class StoreCore {
     if (!t || t.status !== "pending") return null;
     const a = APPS[t.app];
     return {
-      app: t.app, access: t.access, vendor: a.vendor as VendorId, label: a.label,
+      app: t.app, access: t.access, vendor: a.vendor as VendorId, label: t.access === "stream" ? a.label + " web player" : a.label,
       describe: a.describe[t.access] ?? "", ctx: t.ctx,
       ageSec: Math.floor((this.now() - t.created) / 1000), ttlMs: t.exp - this.now(),
     };
@@ -160,7 +160,7 @@ export class StoreCore {
   /** One-time. Needs the claim secret held only by the shared browser. */
   async claim(id: string, secret: string) {
     const t = await this.tx(id);
-    if (!t || t.status !== "approved" || !t.token || !(await this.secretOk(t, secret))) return null;
+    if (!t || t.access === "stream" || t.status !== "approved" || !t.token || !(await this.secretOk(t, secret))) return null;
     const plain = await this.hooks.open(t.token, "t:" + id);
     const cap = rnd(32), now = this.now(), k = "s:" + (await sha(cap));
     const life = Math.max(30_000, Math.min(APPS[t.app].maxLifeMs, (t.tokenLifeMs ?? 3_600_000) - 60_000));
@@ -172,6 +172,19 @@ export class StoreCore {
     t.status = "consumed"; delete t.token; await this.save(id, t);
     await this.sched();
     return { cap, ttlMs: life, app: t.app, access: t.access };
+  }
+
+  /**
+   * Web player (access "stream"): the token is handed over ONCE, to the holder of the claim secret, and the Relay keeps
+   * nothing: no session, no capability, no copy of the token, no refresh token, no account information.
+   */
+  async claimToken(id: string, secret: string) {
+    const t = await this.tx(id);
+    if (!t || t.access !== "stream" || t.status !== "approved" || !t.token || !(await this.secretOk(t, secret))) return null;
+    const token = await this.hooks.open(t.token, "t:" + id);
+    const ttlMs = Math.max(30_000, (t.tokenLifeMs ?? 3_600_000) - 60_000);
+    t.status = "consumed"; delete t.token; await this.save(id, t);
+    return { token, ttlMs, app: t.app, access: t.access };
   }
 
   // ---------------- sessions ----------------

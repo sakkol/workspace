@@ -11,7 +11,9 @@ GOOGLE_CLIENT_ID = "925607426246-n4mjhuvrk0muauunnp56jepbeitu1com.apps.googleuse
 GOOGLE_REDIRECT_URI = "https://sakkol-relay.serdarakkol.workers.dev/oauth/google/callback"
 # Spotify is optional. Leave SPOTIFY_CLIENT_ID empty to deploy Gmail only; fill it in when you do SETUP-STEPS.md step 4.
 SPOTIFY_CLIENT_ID = "e669c61d78b84debb8612becc42cb64c"
-SPOTIFY_REDIRECT_URI = "https://sakkol-relay.serdarakkol.workers.dev/oauth/spotify/callback"
+SPOTIFY_REDIRECT_URI = "https://sakkol-relay.serdarakkol.workers.dev/oauth/spotify/callback"+
+PLAYER_ORIGIN = "https://sakkol-player.github.io"
+PLAYER_URL = "https://sakkol-player.github.io/player/"
 # Secrets (NEVER put these here). Set with `npx wrangler secret put NAME`:
 #   TOKEN_KEY, GOOGLE_CLIENT_SECRET, SPOTIFY_CLIENT_SECRET
 

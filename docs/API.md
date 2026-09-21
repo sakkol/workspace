@@ -8,9 +8,9 @@ Errors look like `{ "error": "code" }`.
 
 | Method & path | Caller | Notes |
 |---|---|---|
-| `POST /link/start` `{app, access, claimHash}` | shared computer | `app` ∈ `gmail`,`spotify`; `access` ∈ `read`,`write` (Spotify: `write` only); `claimHash` = base64url SHA-256 of a 32-byte secret only the browser knows. Returns `{id, code, ttlMs}`. 503 `app_not_configured` if the vendor secrets are not set. |
+| `POST /link/start` `{app, access, claimHash}` | shared computer | `app` ∈ `gmail`,`spotify`; `access` ∈ `read`,`write` (Spotify: `write` = remote control) or `stream` (Spotify web player: only from `PLAYER_ORIGIN`; everything else only from `FRONTEND_ORIGIN`, else 403 `wrong_origin`; 503 `player_not_configured` / `player_not_isolated`); `claimHash` = base64url SHA-256 of a 32-byte secret only the browser knows. Returns `{id, code, ttlMs}`. 503 `app_not_configured` if the vendor secrets are not set. |
 | `GET /link/status/:id` header `X-Claim-Secret` | shared computer | `{status}`: `pending` `approved` `expired` `consumed` `cancelled`. Wrong/missing secret looks like `expired`. |
-| `POST /link/claim/:id` header `X-Claim-Secret` | shared computer | One time. Returns `{cap, ttlMs, app, access}`. 409 otherwise. |
+| `POST /link/claim/:id` header `X-Claim-Secret` | shared computer | One time. From the workspace: `{cap, ttlMs, app, access}`. From the player origin (stream only): `{token, ttlMs, app, access}`: the Spotify token is returned once and the Relay keeps nothing. 409 otherwise. |
 | `GET /link/info/:id` | phone | `{app, access, vendor, label, describe, ctx{ua,city,country}, ageSec, ttlMs}`. **Never includes the code.** |
 | `POST /link/confirm/:id` `{code}` | phone | Code typed by the user. 403 `wrong_code` (`left` attempts), 410 `locked` after 3 wrong tries. Returns `{nonce}`. |
 | `POST /link/cancel/:id` (optional `X-Claim-Secret`) | either | |
@@ -53,3 +53,7 @@ Error codes worth handling: `session_expired` (401), `read_only` (403), `send_li
 ## `GET /health`
 
 `{ok, configured:{tokenKey, google, spotify}}` (booleans only, no values). Use it to check your setup.
+
+
+## Origins (v2.1)
+`FRONTEND_ORIGIN` (workspace) may call everything. `PLAYER_ORIGIN` (Spotify web player, must differ from `FRONTEND_ORIGIN`) may call only `/link/*`. CORS echoes the specific calling origin. `GET /health` also returns `configured.player`.

@@ -5,10 +5,10 @@ Unlock your apps on an **untrusted shared computer** using your **trusted phone*
 | App | v2 status |
 |---|---|
 | Gmail | read-only **or** read & write (send, reply, star, archive, trash) |
-| Spotify | search + remote control of playback on your own devices |
+| Spotify | remote control of your own devices **or** a web player in a separate browser tab (v2.1) |
 | Google Drive, Notion | "coming soon" tiles (no backend yet) |
 
-**Start here:** [`SETUP-STEPS.md`](SETUP-STEPS.md) (deploy + Google/Spotify/Cloudflare/GitHub configuration, all phases).
+**Start here:** [`SETUP-STEPS.md`](SETUP-STEPS.md) (deploy + Google/Spotify/Cloudflare/GitHub configuration, all phases). Spotify web player: [`SETUP-STEPS-v2.1.md`](SETUP-STEPS-v2.1.md).
 Next versions (for an AI agent): [`docs/NEXT-STEPS-FOR-AI-AGENT.md`](docs/NEXT-STEPS-FOR-AI-AGENT.md).
 Then: [`docs/SECURITY.md`](docs/SECURITY.md) · [`docs/API.md`](docs/API.md) · [`docs/SECURITY-REVIEW-v1.md`](docs/SECURITY-REVIEW-v1.md).
 

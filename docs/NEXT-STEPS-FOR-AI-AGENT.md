@@ -132,6 +132,8 @@ Everything else stays as in spec v1.2 plus `docs/SECURITY.md`.
 
 ### v2.1: Spotify inside the tab (Web Playback SDK)
 
+> **STATUS: IMPLEMENTED.** Deviations from the design below (owner's choices): the player is hosted on a **GitHub organization Pages site** (not Cloudflare Pages); the token is **delivered once at claim** to the player origin (`claimToken`, access level `stream`), so there is **no capability, no Relay session and no `/spotify/sdk-token` route**; the QR/code are shown **in the player site**, which the workspace opens in a new tab (no iframe, no cross-site messages); `sessionStorage` mirroring is **opt-in** (default off). See `docs/SECURITY.md` (v2.1 addendum) and `SETUP-STEPS-v2.1.md`. Treat the text below as design history.
+
 **Goal:** the shared computer's own tab becomes a Spotify player (audio from that browser), so the owner does not need Spotify open on another device. Keep the existing remote-control mode.
 
 **Why this needs care:** the SDK is JavaScript loaded from `sdk.scdn.co` and needs an access token in the page. Anything in the same JavaScript context or same **origin** as that script can be read by it. The main origin holds the Gmail (and future) capabilities, so **the SDK must never run in the main origin.**

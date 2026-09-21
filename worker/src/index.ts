@@ -25,18 +25,23 @@ export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const u = new URL(req.url), p = u.pathname;
     const origin = req.headers.get("Origin");
-    const okOrigin = origin === env.FRONTEND_ORIGIN;
+    // Two front-end origins: the workspace (FRONTEND_ORIGIN) and the isolated Spotify web player (PLAYER_ORIGIN).
+    // The player origin is honoured only when it is configured AND different from the workspace origin (fail closed).
+    const playerState = !env.PLAYER_ORIGIN || !env.PLAYER_URL ? "off" : env.PLAYER_ORIGIN === env.FRONTEND_ORIGIN ? "same_origin" : "ok";
+    const isMain = origin === env.FRONTEND_ORIGIN;
+    const isPlayer = playerState === "ok" && origin === env.PLAYER_ORIGIN;
+    const okOrigin = isMain || isPlayer;
 
     const J = (body: unknown, status = 200, extra: Record<string, string> = {}) => {
       const h = new Headers({ ...SEC, "Content-Type": "application/json", ...extra });
-      if (okOrigin) { h.set("Access-Control-Allow-Origin", env.FRONTEND_ORIGIN); h.set("Vary", "Origin"); }
+      if (okOrigin) { h.set("Access-Control-Allow-Origin", origin as string); h.set("Vary", "Origin"); }
       return new Response(JSON.stringify(body), { status, headers: h });
     };
 
     if (req.method === "OPTIONS") {
       const h = new Headers({ ...SEC });
       if (okOrigin) {
-        h.set("Access-Control-Allow-Origin", env.FRONTEND_ORIGIN);
+        h.set("Access-Control-Allow-Origin", origin as string);
         h.set("Access-Control-Allow-Methods", "GET,POST");
         h.set("Access-Control-Allow-Headers", "Authorization,Content-Type,X-Claim-Secret");
         h.set("Access-Control-Max-Age", "600");
@@ -49,14 +54,15 @@ export default {
     if (p === "/health") {
       return new Response(JSON.stringify({
         ok: true,
-        configured: { tokenKey: !!env.TOKEN_KEY, google: configured(env, "google"), spotify: configured(env, "spotify") },
+        configured: { tokenKey: !!env.TOKEN_KEY, google: configured(env, "google"), spotify: configured(env, "spotify"), player: playerState === "ok" && configured(env, "spotify") },
       }), { headers: { ...SEC, "Content-Type": "application/json" } });
     }
 
     // Browser-navigation endpoints (OAuth) cannot send an Origin. Everything else must come from the frontend.
     // NOTE: Origin is a CORS/CSRF aid, not authentication (curl can forge it). Real protection = claim secret + capability.
     const isNav = p.startsWith("/oauth/");
-    if (!isNav && !okOrigin) return J({ error: "forbidden_origin" }, 403);
+    // The player origin may only talk to the linking endpoints. Gmail, Spotify remote control and session revoke are workspace-only.
+    if (!isNav && !(isMain || (isPlayer && p.startsWith("/link/")))) return J({ error: "forbidden_origin" }, 403);
     if (!env.TOKEN_KEY) { console.error("config_error: TOKEN_KEY missing"); return J({ error: "server_misconfigured" }, 500); }
 
     const store = env.STORE.getByName("main");
@@ -82,6 +88,9 @@ export default {
       if (p === "/link/start" && req.method === "POST") {
         if (!(await lim("start", 10))) return J({ error: "rate_limited" }, 429);
         const b = await json();
+        const stream = b.access === "stream";
+        if (stream && playerState !== "ok") return J({ error: playerState === "same_origin" ? "player_not_isolated" : "player_not_configured" }, 503);
+        if (stream !== isPlayer) return J({ error: "wrong_origin" }, 403); // only the player origin starts "stream"; only the workspace starts everything else
         const app = typeof b.app === "string" && Object.hasOwn(APPS, b.app) ? (b.app as keyof typeof APPS) : null;
         if (app && !configured(env, APPS[app].vendor)) return J({ error: "app_not_configured" }, 503);
         const cf = (req as any).cf ?? {};
@@ -95,7 +104,7 @@ export default {
       }
       if ((m = p.match(/^\/link\/claim\/([\w-]+)$/)) && req.method === "POST") {
         if (!(await lim("claim", 20))) return J({ error: "rate_limited" }, 429);
-        const r = await store.claim(m[1], secret);
+        const r = isPlayer ? await store.claimToken(m[1], secret) : await store.claim(m[1], secret);
         return r ? J(r) : J({ error: "not_claimable" }, 409);
       }
       if ((m = p.match(/^\/link\/(info|confirm|cancel)\/([\w-]+)$/))) {
@@ -120,7 +129,7 @@ export default {
         if (!(await lim("oauth", 20))) return page("Too many requests", 429);
         const vendor = m[1] as "google" | "spotify";
         const b = await store.begin(u.searchParams.get("tx") || "", u.searchParams.get("n") || "");
-        if (!b || b.vendor !== vendor || !configured(env, vendor)) return redirect(`${env.FRONTEND_URL}#/p/x/error?r=expired`);
+        if (!b || b.vendor !== vendor || !configured(env, vendor) || (b.access === "stream" && playerState !== "ok")) return redirect(`${env.FRONTEND_URL}#/p/x/error?r=expired`);
         const cr = creds(env, vendor);
         const q = new URLSearchParams({
           client_id: cr.id, redirect_uri: cr.redirect, response_type: "code",
@@ -134,7 +143,8 @@ export default {
         const vendor = m[1] as "google" | "spotify";
         const s = await store.takeState(u.searchParams.get("state") || "");
         if (!s) return redirect(`${env.FRONTEND_URL}#/p/x/error?r=state`);
-        const back = (r: string) => redirect(`${env.FRONTEND_URL}#/p/${s.id}/error?r=${r}`);
+        const base = s.access === "stream" ? (env.PLAYER_URL as string) : env.FRONTEND_URL; // send the phone back to the site that showed the QR
+        const back = (r: string) => redirect(`${base}#/p/${s.id}/error?r=${r}`);
         if (s.vendor !== vendor) { await store.fail(s.id); return back("state"); }
         const code = u.searchParams.get("code");
         if (u.searchParams.get("error") || !code) { await store.fail(s.id); return back("denied"); }
@@ -144,7 +154,7 @@ export default {
         const r = await store.approve(s.id, ex);
         if (r === "scope") return back("scope");
         if (r !== "ok") return back("state");
-        return redirect(`${env.FRONTEND_URL}#/p/${s.id}/done`);
+        return redirect(`${base}#/p/${s.id}/done`);
       }
 
       // ---------------- authenticated ----------------

@@ -3,7 +3,18 @@ import { lockAll, lockApp } from "./core/api";
 import { caps, every, go, rerender, takeNotice, AppId, Access } from "./core/state";
 import { TILES } from "./apps/registry";
 
-const choice: Record<string, Access> = { gmail: "read", spotify: "write" }; // least privilege by default
+// The Spotify web player lives on its OWN site (different origin) because it loads Spotify's script. The workspace only
+// opens it in a new tab: no token, capability or message ever passes between the two sites.
+const PLAYER_URL = ((import.meta.env.VITE_PLAYER_URL as string | undefined) || "").trim();
+interface Mode { id: string; label: string; access?: Access; open?: string }
+const MODES: Record<string, Mode[]> = {
+  gmail: [{ id: "read", label: "Read only", access: "read" }, { id: "write", label: "Read & write", access: "write" }],
+  spotify: [
+    ...(PLAYER_URL ? [{ id: "player", label: "Web player (opens a new tab)", open: PLAYER_URL }] : []),
+    { id: "remote", label: "Remote control (plays on your phone or speaker)", access: "write" as Access },
+  ],
+};
+const choice: Record<string, string> = { gmail: "read", spotify: PLAYER_URL ? "player" : "remote" }; // least privilege by default
 
 export function launcher(root: HTMLElement) {
   const notice = takeNotice();
@@ -26,14 +37,20 @@ export function launcher(root: HTMLElement) {
           h("button", { onclick: async () => { await lockApp(t.id as AppId); rerender(); } }, "Lock")));
     }
 
-    const opts = t.accessChoices ?? ["write"];
-    const radios = opts.length > 1
-      ? h("div", { cls: "choices" }, ...opts.map((a) => h("label", {},
-          h("input", { type: "radio", name: "acc-" + t.id, checked: choice[t.id] === a, onchange: () => { choice[t.id] = a; } }),
-          a === "read" ? " Read only" : " Read & write")))
+    const modes = MODES[t.id] ?? [];
+    const radios = modes.length > 1
+      ? h("div", { cls: "choices" }, ...modes.map((m) => h("label", {},
+          h("input", { type: "radio", name: "acc-" + t.id, checked: choice[t.id] === m.id, onchange: () => { choice[t.id] = m.id; } }),
+          " " + m.label)))
       : null;
+    const unlock = () => {
+      const m = modes.find((x) => x.id === choice[t.id]) ?? modes[0];
+      if (!m) return;
+      if (m.open) window.open(m.open, "_blank", "noopener,noreferrer"); // noopener: the new tab gets no handle on this page
+      else go({ n: "unlock", app: t.id as AppId, access: m.access! });
+    };
     return h("div", { cls: "tile" }, ...kids, h("div", { cls: "small" }, "🔒 Locked"), radios,
-      h("div", { cls: "row-l" }, h("button", { cls: "pri", onclick: () => go({ n: "unlock", app: t.id as AppId, access: opts.length > 1 ? choice[t.id] : opts[0] }) }, "Unlock")));
+      h("div", { cls: "row-l" }, h("button", { cls: "pri", onclick: unlock }, "Unlock")));
   });
 
   set(root,

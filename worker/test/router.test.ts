@@ -35,6 +35,8 @@ beforeEach(() => {
     if (u === "https://oauth2.googleapis.com/token")
       return Response.json({ access_token: SECRET_TOKEN, expires_in: 3600, scope: grantedScope, token_type: "Bearer" });
     if (u.endsWith("/labels/INBOX")) return Response.json({ messagesUnread: 3, messagesTotal: 10 });
+    if (u === "https://accounts.spotify.com/api/token")
+      return Response.json({ access_token: SECRET_TOKEN, refresh_token: "REFRESH-MUST-NOT-BE-KEPT", expires_in: 3600, scope: grantedScope, token_type: "Bearer" });
     if (u.endsWith("/messages/send")) return Response.json({ id: "sent1" });
     if (u.includes("/threads?")) return Response.json({ threads: [{ id: "t1" }], nextPageToken: null });
     if (u.includes("/threads/t1?format=metadata")) return Response.json({ id: "t1", snippet: "thanks!", messages: [
@@ -73,7 +75,7 @@ const bearer = (cap: string) => ({ Authorization: "Bearer " + cap });
 describe("router", () => {
   it("/health reports booleans only", async () => {
     const r = await call("/health", { origin: null });
-    expect(await r.json()).toEqual({ ok: true, configured: { tokenKey: true, google: true, spotify: false } });
+    expect(await r.json()).toEqual({ ok: true, configured: { tokenKey: true, google: true, spotify: false, player: false } });
   });
 
   it("rejects API calls from other origins, and sets CORS only for the frontend", async () => {
@@ -250,3 +252,96 @@ describe("router", () => {
     expect((await post("/link/start", {})).status).toBe(500);
   });
 });
+
+// ---------------- v2.1: Spotify web player on an isolated origin ----------------
+const PLAYER = "https://player.example";
+describe("spotify web player (isolated origin)", () => {
+  beforeEach(() => {
+    env = { ...env, SPOTIFY_CLIENT_ID: "sid", SPOTIFY_CLIENT_SECRET: "ssecret", SPOTIFY_REDIRECT_URI: RELAY + "/oauth/spotify/callback",
+      PLAYER_ORIGIN: PLAYER, PLAYER_URL: PLAYER + "/player/" };
+  });
+  const asPlayer = (path: string, init: RequestInit = {}) => call(path, { ...init, origin: PLAYER });
+  const playerPost = (path: string, body?: unknown, headers: Record<string, string> = {}) =>
+    asPlayer(path, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body), headers });
+
+  async function unlockStream(scope?: string) {
+    const secret = b64u(crypto.getRandomValues(new Uint8Array(32)));
+    const start = await (await playerPost("/link/start", { app: "spotify", access: "stream", claimHash: await sha(secret) })).json() as any;
+    const conf = await (await playerPost("/link/confirm/" + start.id, { code: start.code })).json() as any;
+    const auth = await call(`/oauth/spotify?tx=${start.id}&n=${conf.nonce}`, { origin: null });
+    const authUrl = new URL(auth.headers.get("Location")!);
+    grantedScope = scope ?? authUrl.searchParams.get("scope")!;
+    const cb = await call(`/oauth/spotify/callback?code=abc&state=${encodeURIComponent(authUrl.searchParams.get("state")!)}`, { origin: null });
+    return { start, secret, authUrl, cb, hdr: { "X-Claim-Secret": secret } };
+  }
+
+  it("hands the token over exactly once, keeps no session, and never keeps the refresh token", async () => {
+    const u = await unlockStream();
+    expect(u.authUrl.searchParams.get("scope")).toBe("streaming user-read-email user-read-private user-read-playback-state user-modify-playback-state");
+    expect(u.authUrl.searchParams.has("include_granted_scopes")).toBe(false);
+    // the phone is sent back to the PLAYER site, not the workspace
+    expect(u.cb.headers.get("Location")).toBe(`${PLAYER}/player/#/p/${u.start.id}/done`);
+    // the workspace origin can neither poll-claim it nor start one
+    expect((await post("/link/claim/" + u.start.id, undefined, u.hdr)).status).toBe(409);
+    // claim: only from the player origin, only with the claim secret
+    expect((await playerPost("/link/claim/" + u.start.id)).status).toBe(409);
+    const r = await playerPost("/link/claim/" + u.start.id, undefined, u.hdr);
+    expect(r.status).toBe(200);
+    const j = await r.json() as any;
+    expect(j).toMatchObject({ token: SECRET_TOKEN, app: "spotify", access: "stream" });
+    expect(j.ttlMs).toBe(3_540_000);
+    expect((await playerPost("/link/claim/" + u.start.id, undefined, u.hdr)).status).toBe(409); // single use
+    // the Relay kept nothing: no session, no token, no refresh token, in storage
+    const stored = JSON.stringify([...(core as any).kv.m]);
+    expect(stored).not.toContain("REFRESH-MUST-NOT-BE-KEPT");
+    expect(stored).not.toContain(SECRET_TOKEN);
+    expect([...(core as any).kv.m.keys()].some((k: string) => k.startsWith("s:"))).toBe(false);
+    // and the refresh token never reached the browser either
+    expect(JSON.stringify(j)).not.toContain("REFRESH");
+  });
+
+  it("origin rules: workspace cannot start a stream, player cannot start anything else", async () => {
+    const h = await sha("x");
+    expect((await post("/link/start", { app: "spotify", access: "stream", claimHash: h })).status).toBe(403);
+    expect((await playerPost("/link/start", { app: "spotify", access: "write", claimHash: h })).status).toBe(403);
+    expect((await playerPost("/link/start", { app: "gmail", access: "read", claimHash: h })).status).toBe(403);
+    expect((await playerPost("/link/start", { app: "gmail", access: "stream", claimHash: h })).status).toBe(400); // gmail has no stream scopes
+  });
+
+  it("player origin cannot reach Gmail, Spotify remote control or session revoke", async () => {
+    const g = await unlock("write");
+    const { cap } = await (await g.claim()).json() as any;
+    for (const [path, init] of [["/gmail/profile", { headers: bearer(cap) }], ["/spotify/player", { headers: bearer(cap) }], ["/session/revoke", { method: "POST", headers: bearer(cap) }]] as const)
+      expect((await asPlayer(path, init as RequestInit)).status).toBe(403);
+  });
+
+  it("CORS echoes exactly the calling allowed origin and rejects others", async () => {
+    expect((await asPlayer("/link/info/x")).headers.get("Access-Control-Allow-Origin")).toBe(PLAYER);
+    expect((await call("/link/info/x", { origin: "https://evil.example" })).status).toBe(403);
+    const pre = await call("/link/start", { method: "OPTIONS", origin: PLAYER });
+    expect(pre.headers.get("Access-Control-Allow-Origin")).toBe(PLAYER);
+  });
+
+  it("fails closed when the player origin equals the workspace origin, or is not configured", async () => {
+    env.PLAYER_ORIGIN = ORIGIN;
+    const same = await post("/link/start", { app: "spotify", access: "stream", claimHash: await sha("x") });
+    expect(same.status).toBe(503); expect(await same.json()).toEqual({ error: "player_not_isolated" });
+    env.PLAYER_ORIGIN = ""; env.PLAYER_URL = "";
+    const off = await post("/link/start", { app: "spotify", access: "stream", claimHash: await sha("x") });
+    expect(off.status).toBe(503); expect(await off.json()).toEqual({ error: "player_not_configured" });
+    // with the same-origin config the "player origin" is not honoured at all
+    env.PLAYER_ORIGIN = ORIGIN; env.PLAYER_URL = ORIGIN + "/player/";
+    expect((await call("/health", { origin: null }).then((r) => r.json()) as any).configured.player).toBe(false);
+  });
+
+  it("a missing scope (user unticked something) yields no token", async () => {
+    const u = await unlockStream("user-read-email user-read-private");
+    expect(u.cb.headers.get("Location")).toContain("error?r=scope");
+    expect((await playerPost("/link/claim/" + u.start.id, undefined, u.hdr)).status).toBe(409);
+  });
+
+  it("/health reports the player as configured", async () => {
+    expect(((await call("/health", { origin: null }).then((r) => r.json())) as any).configured).toMatchObject({ spotify: true, player: true });
+  });
+});
+

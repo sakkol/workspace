@@ -212,3 +212,37 @@ describe("rate limiting", () => {
     expect(s.core.hit("k", 3, 60_000)).toBe(true);
   });
 });
+
+describe("stream (web player) transactions", () => {
+  const STREAM_SCOPE = "streaming user-read-email user-read-private user-read-playback-state user-modify-playback-state";
+  it("claimToken returns the token once, needs the claim secret, and leaves no session or token behind", async () => {
+    const s = setup(); const a = await approvedTx(s, "spotify", "stream", STREAM_SCOPE);
+    expect(a.res).toBe("ok");
+    expect(await s.core.claimToken(a.id, "wrong")).toBeNull();
+    const r = await s.core.claimToken(a.id, a.secret);
+    expect(r).toMatchObject({ token: "TOKEN-spotify", app: "spotify", access: "stream", ttlMs: 3_540_000 });
+    expect(await s.core.claimToken(a.id, a.secret)).toBeNull();
+    expect([...s.kv.m.keys()].some((k) => k.startsWith("s:"))).toBe(false);
+    expect(JSON.stringify([...s.kv.m])).not.toContain("TOKEN-spotify");
+  });
+  it("a stream transaction cannot be claimed as a normal capability, and vice versa", async () => {
+    const s = setup();
+    const a = await approvedTx(s, "spotify", "stream", STREAM_SCOPE);
+    expect(await s.core.claim(a.id, a.secret)).toBeNull();
+    const g = await approvedTx(s, "gmail", "read");
+    expect(await s.core.claimToken(g.id, g.secret)).toBeNull();
+  });
+  it("requires every stream scope", async () => {
+    const s = setup();
+    const a = await approvedTx(s, "spotify", "stream", "user-read-email user-read-private");
+    expect(a.res).toBe("scope");
+    expect(await s.core.claimToken(a.id, a.secret)).toBeNull();
+  });
+  it("gmail has no stream level and info() labels the web player", async () => {
+    const s = setup(); const { hash } = await newSecret();
+    expect(await s.core.newTx("gmail", "stream", hash, CTX)).toEqual({ error: "bad_request" });
+    const tx: any = await s.core.newTx("spotify", "stream", hash, CTX);
+    expect(await s.core.info(tx.id)).toMatchObject({ label: "Spotify web player", access: "stream" });
+  });
+});
+
