@@ -18,7 +18,7 @@ jobs:
       - run: npm test && npm run build
         working-directory: web
         env: { VITE_RELAY_URL: "${{ vars.VITE_RELAY_URL }}", VITE_PLAYER_URL: "${{ vars.VITE_PLAYER_URL }}" }
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with: { path: web/dist }
   deploy:
     needs: build
