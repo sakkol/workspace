@@ -60,8 +60,8 @@ export function launcher(root: HTMLElement) {
     notice ? h("p", { cls: "notice", role: "status" }, notice) : null,
     h("div", { cls: "bar" }, h("div", {}, h("strong", {}, "Your workspace"), h("div", { cls: "mut small" }, "Unlock an app with your phone.")),
       caps.size ? h("button", { cls: "done", onclick: async () => { await lockAll(); rerender(); } }, "DONE — lock everything") : null),
-    h("div", { cls: "widgets" }, clockWidget(), timerWidget()),
     h("div", { cls: "grid" }, ...tiles),
+    h("div", { cls: "widgets" }, clockWidget(), timerWidget()),
     linksWidget(),
     h("p", { cls: "mut small" }, "Nothing is saved on this computer. Refreshing or closing this page locks everything. Use “Read only” on computers you trust least."));
   every(() => timers.forEach((f) => f()), 1000);

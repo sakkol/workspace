@@ -20,8 +20,10 @@ export const QUICK_LINKS: QuickLink[] = [
 
 export interface ExtraClock { label: string; timeZone: string }
 
-// Extra clocks shown under the main clock, using IANA time zone names, for example:
-//   { label: "Istanbul", timeZone: "Europe/Istanbul" },
-//   { label: "New York", timeZone: "America/New_York" },
-//   { label: "Chicago", timeZone: "America/Chicago" },
-export const EXTRA_CLOCKS: ExtraClock[] = [];
+// Extra clocks shown under the main clock, using IANA time zone names:
+
+export const EXTRA_CLOCKS: ExtraClock[] = [
+	{ label: "Istanbul", timeZone: "Europe/Istanbul" },
+	{ label: "New York", timeZone: "America/New_York" },
+	{ label: "Chicago", timeZone: "America/Chicago" }
+];
