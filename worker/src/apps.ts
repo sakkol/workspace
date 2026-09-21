@@ -41,11 +41,13 @@ export const APPS: Record<AppId, AppDef> = {
     scopes: {
       write: "user-read-playback-state user-read-currently-playing user-modify-playback-state",
       // The Web Playback SDK requires streaming + user-read-email + user-read-private.
-      stream: "streaming user-read-email user-read-private user-read-playback-state user-modify-playback-state",
+      // Library browsing also needs the read scopes below because the player uses the same
+      // short-lived Spotify token to read the user's saved albums and playlists.
+      stream: "streaming user-read-email user-read-private user-read-playback-state user-modify-playback-state user-library-read playlist-read-private playlist-read-collaborative",
     },
     describe: {
       write: "See what is playing and control playback on your Spotify devices. Cannot see your email or payment details.",
-      stream: "Play music in a browser tab (Spotify web player). That tab receives a Spotify access token valid for about an hour that cannot be revoked early, and it can read your Spotify email address and country.",
+      stream: "Play music in a browser tab (Spotify web player), search tracks, and browse your saved albums and playlists. That tab receives a Spotify access token valid for about an hour that cannot be revoked early, and it can read your Spotify email address, country, saved albums, and playlists.",
     },
     maxLifeMs: 45 * 60_000, // Spotify access tokens last ~60 min
     idleMs: 15 * 60_000,
