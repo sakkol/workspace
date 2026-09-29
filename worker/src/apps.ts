@@ -1,11 +1,11 @@
 // One entry per unlockable app. To add an app (Drive, Notion...), add it here, add a vendor in
 // vendors.ts if needed, add a route file, and add a tile in the frontend registry.
 
-export type AppId = "gmail" | "spotify";
+export type AppId = "gmail" | "spotify" | "outlook";
 // "stream" = Spotify Web Playback SDK in the isolated player site: the browser receives a short-lived token ONCE at claim
 // (no Relay session, no capability). Only the player origin may start/claim it.
 export type Access = "read" | "write" | "stream";
-export type VendorId = "google" | "spotify";
+export type VendorId = "google" | "spotify" | "microsoft";
 
 export interface AppDef {
   id: AppId;
@@ -52,9 +52,38 @@ export const APPS: Record<AppId, AppDef> = {
     maxLifeMs: 45 * 60_000, // Spotify access tokens last ~60 min
     idleMs: 15 * 60_000,
   },
+  outlook: {
+    id: "outlook",
+    vendor: "microsoft",
+    label: "Outlook",
+    scopes: {
+      read: "https://graph.microsoft.com/Mail.Read",
+      // Mail.ReadWrite = read, flag, move. Mail.Send = send/reply. NEVER: offline_access, MailboxSettings.*, Mail.*.Shared, Contacts, Calendars.
+      write: "https://graph.microsoft.com/Mail.ReadWrite https://graph.microsoft.com/Mail.Send",
+    },
+    describe: {
+      read: "Read your Outlook email. Nothing can be sent or changed.",
+      write: "Read, send, reply, flag, archive and move Outlook email to Deleted Items. Cannot permanently delete mail or change settings, rules or forwarding.",
+    },
+    maxLifeMs: 30 * 60_000,
+    idleMs: 5 * 60_000,
+  },
 };
 
 export const isApp = (x: unknown): x is AppId => typeof x === "string" && Object.hasOwn(APPS, x);
 export const isAccess = (x: unknown): x is Access => x === "read" || x === "write" || x === "stream";
 export const scopesFor = (app: AppId, access: Access) => APPS[app].scopes[access] ?? "";
 export const scopeList = (s: string) => s.split(/[ ,]+/).filter(Boolean);
+
+/**
+ * Scope comparison is vendor-specific. Microsoft may return scopes in another case, with or without the
+ * "https://graph.microsoft.com/" prefix, and may add default scopes (User.Read, profile, openid, email) that we never asked for.
+ */
+export const normalizeScope = (vendor: VendorId, s: string) =>
+  vendor === "microsoft" ? s.trim().toLowerCase().replace(/^https:\/\/graph\.microsoft\.com\//, "") : s;
+
+/** True only if EVERY requested scope was granted. Extra granted scopes are tolerated and never used (R8). */
+export const scopesGranted = (vendor: VendorId, requested: string, granted: string) => {
+  const g = new Set(scopeList(granted).map((x) => normalizeScope(vendor, x)));
+  return scopeList(requested).every((x) => g.has(normalizeScope(vendor, x)));
+};

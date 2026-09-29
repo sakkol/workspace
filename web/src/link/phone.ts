@@ -9,7 +9,7 @@ const REASONS: Record<string, string> = {
   scope: "You did not grant the requested permission. Start again and leave the permission ticked, or choose “Read only”.",
 };
 
-const NOTE = "Approving creates a “connected app” entry on your Google / Spotify account. It stays there until you remove it (myaccount.google.com/permissions, spotify.com/account/apps), even after this session ends.";
+const NOTE = "Approving creates a “connected app” entry on your Google / Microsoft / Spotify account. It stays there until you remove it (myaccount.google.com/permissions, account.live.com/consent/Manage, spotify.com/account/apps), even after this session ends.";
 
 /** The trusted phone page. Never holds capabilities and never asks for a provider password. */
 export async function phoneView(root: HTMLElement, id: string, sub: string) {

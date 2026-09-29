@@ -1,6 +1,6 @@
 import { KV, Hooks, StoreCore } from "../src/core";
 import { b64u, sha } from "../src/security";
-import type { AppId, Access } from "../src/apps";
+import { scopesFor, type AppId, type Access } from "../src/apps";
 
 export class FakeKV implements KV {
   m = new Map<string, unknown>();
@@ -46,9 +46,7 @@ export async function approvedTx(s: ReturnType<typeof setup>, app: AppId = "gmai
   const conf: any = await s.core.confirm(tx.id, tx.code);
   const b: any = await s.core.begin(tx.id, conf.nonce);
   const st: any = await s.core.takeState(b.state);
-  const granted = scope ?? (app === "gmail"
-    ? (access === "write" ? "https://www.googleapis.com/auth/gmail.modify" : "https://www.googleapis.com/auth/gmail.readonly")
-    : "user-read-playback-state user-read-currently-playing user-modify-playback-state");
+  const granted = scope ?? scopesFor(app, access); // by default the vendor grants exactly what was requested
   const res = await s.core.approve(st.id, { token: "TOKEN-" + app, tokenLifeMs: 3_600_000, scope: granted });
   return { tx, secret, res, id: tx.id as string };
 }

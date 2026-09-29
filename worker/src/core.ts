@@ -1,13 +1,13 @@
 // All single-use / expiry / limit logic lives here, with NO Cloudflare imports, so it can be unit-tested in Node.
 // The Durable Object (store.ts) is a thin wrapper: one DO instance = atomic, single-threaded state.
 
-import { APPS, AppId, Access, VendorId, isAccess, isApp, scopeList, scopesFor } from "./apps";
+import { APPS, AppId, Access, VendorId, isAccess, isApp, scopesFor, scopesGranted } from "./apps";
 import { rnd, sha, timingSafeEqual } from "./security";
 
 export const TX_TTL = 150_000; // link transaction lifetime: 2.5 min
 export const MAX_PENDING = 100; // cap on simultaneous transactions
 export const CODE_TRIES = 3; // wrong-code attempts before a transaction is cancelled
-export const MAX_SENDS = 10; // Gmail messages per session
+export const MAX_SENDS = 10; // messages (Gmail or Outlook) per session
 
 export interface KV {
   get<T = unknown>(k: string): Promise<T | undefined>;
@@ -132,8 +132,7 @@ export class StoreCore {
   async approve(id: string, r: { token: string; tokenLifeMs: number; scope: string }): Promise<"ok" | "scope" | "state"> {
     const t = await this.tx(id);
     if (!t || t.status !== "exchanging") return "state";
-    const granted = scopeList(r.scope);
-    if (!scopeList(scopesFor(t.app, t.access)).every((s) => granted.includes(s))) {
+    if (!scopesGranted(APPS[t.app].vendor, scopesFor(t.app, t.access), r.scope)) {
       t.status = "cancelled"; await this.save(id, t);
       this.hooks.revoke(t.app, r.token); // do not keep a token that does less than requested
       return "scope";
@@ -213,12 +212,12 @@ export class StoreCore {
     try { this.hooks.revoke(s.app, await this.hooks.open(s.token, k)); } catch { /* best effort */ }
   }
 
-  /** Reserve one of the session's Gmail sends. Counted before sending, so failed attempts cannot be retried forever. */
-  async sendSlot(cap: string) {
+  /** Reserve one of the session's sends (Gmail or Outlook; the capability must belong to `app`). Counted before sending, so failed attempts cannot be retried forever. */
+  async sendSlot(cap: string, app: AppId = "gmail") {
     const k = "s:" + (await sha(cap));
     const s = await this.kv.get<Sess>(k);
     const now = this.now();
-    if (!s || s.v !== 2 || s.app !== "gmail" || s.access !== "write" || this.expired(s, now)) return { ok: false as const, reason: "session_expired" as const };
+    if (!s || s.v !== 2 || s.app !== app || (app !== "gmail" && app !== "outlook") || s.access !== "write" || this.expired(s, now)) return { ok: false as const, reason: "session_expired" as const };
     if (s.sends >= MAX_SENDS) return { ok: false as const, reason: "send_limit" as const };
     s.sends += 1; s.last = now; await this.kv.put(k, s);
     return { ok: true as const, left: MAX_SENDS - s.sends };

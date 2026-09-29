@@ -98,3 +98,37 @@ Gmail caps (10 sends, 10 recipients, 50 KB body) and Spotify limits (45 min / 15
 - [ ] After DONE, player-origin sessionStorage is empty
 - [ ] `wrangler tail` shows no token/refresh token
 - [ ] `/health` shows `"player":true` only when PLAYER_ORIGIN differs from FRONTEND_ORIGIN
+
+
+---
+
+# v3 addendum: Outlook (Microsoft Graph)
+
+Microsoft is a **new vendor** (`microsoft`), unlocked with its own QR scan. It is never bundled with Gmail or Spotify (R7) and has its own capability, bound to app `outlook` (R4).
+
+## Controls
+- **Plain OAuth, no MSAL.** MSAL adds `offline_access` (refresh token) and `openid profile email` (identity). The authorize URL has PKCE S256, `state`, the exact redirect URI, `prompt=select_account` and the exact scopes; a test asserts it never contains `offline_access`, `include_granted_scopes` or `client_secret`. Client secret goes in the token request body, server-side only.
+- **Scopes:** read = `Mail.Read`; write = `Mail.ReadWrite Mail.Send`. Never requested: `offline_access`, `MailboxSettings.*` (rules, auto-forward), `Mail.*.Shared`, `User.*`, `Directory.*`, `Contacts.*`, `Calendars.*`. `Mail.ReadWrite` can move/flag/edit mail; the Relay exposes only read, flag, move to Archive/Deleted Items/Inbox and send/reply, and never calls `DELETE`. `Mail.ReadWrite` would also permit editing message drafts and content at Graph level; that power exists on the Relay-held token only, and the Relay's route allow-list is the boundary.
+- **Scope check with a vendor normalizer** (`normalizeScope`): lower-case, `https://graph.microsoft.com/` prefix stripped; **every requested scope must be present**; extra default scopes Microsoft adds (`User.Read`, `profile`, `openid`, `email`) are tolerated and never used.
+- **No refresh token, no account info (R6, R26):** if Microsoft returns a refresh token it is discarded and only `security_event: unexpected_refresh_token (discarded)` is logged. The Relay never calls `/me`; unread/total counts come from `/me/mailFolders/inbox`. Tenant defaults to `consumers`; an invalid `MICROSOFT_TENANT` makes the vendor "not configured" (fail closed).
+- **Sessions:** 30 min max, 5 min idle, capped at `expires_in − 60 s`, enforced by the Relay. Microsoft has **no access-token revocation endpoint**: on Lock/expiry the Relay deletes its (AES-GCM sealed) copy; the token itself stays valid at Microsoft until it expires (60–90 min). It never left the Relay.
+- **Injection / SSRF:** conversation and message ids match `^[A-Za-z0-9_=-]{1,300}$` (so no quotes or OData operators); `odataStr()` additionally doubles single quotes. Folders are a whitelist. The browser never supplies a URL: for paging the Relay reads only `$skiptoken`/`$skip` out of Graph's `@odata.nextLink` (only if it points at `graph.microsoft.com`) and hands the browser an opaque token that is regex-validated on the way back; the request is rebuilt by the Relay.
+- **Content is untrusted text (R12):** bodies are requested as text; HTML that arrives anyway is reduced to text (`htmlToText`, shared with Gmail). Rendered with `textContent` in a `<pre>`; links are not clickable; the real sender address is always shown.
+- **Write limits:** read-only sessions get 403 on every write route (tested: no Graph call is made). Trash = move to Deleted Items. 10 sends/session (send and reply share the counter, kept in the Durable Object), 3 sends/min, 60 writes/min, ≤ 30 messages touched per conversation action. **Reply recipients are chosen by Outlook**, not by the browser; reply-all, Bcc, attachments, forwarding, categories, rules and permanent delete do not exist.
+- `Prefer: IdType="ImmutableId"` is sent on every Graph call so message ids survive moves (otherwise archive/trash would change the id).
+
+## Residual risks (accepted)
+- The Microsoft access token cannot be revoked early (see above). A "connected app" entry stays in the Microsoft account until removed at https://account.live.com/consent/Manage.
+- The app-registration **client secret expires** (max 24 months). When it does, Outlook unlocks fail with "failed" on the phone until a new secret is stored (`npx wrangler secret put MICROSOFT_CLIENT_SECRET`).
+- Conversation `count` in a list is per page/folder and may be lower than the true conversation size; the conversation view shows the real count.
+- Graph's own idea of a "conversation" (`conversationId`) may differ from what Outlook's UI shows (e.g. subject changes).
+
+## Manual checklist additions (v3)
+- [ ] `/health` shows `"microsoft":true` only after client id, secret, redirect and tenant are set
+- [ ] Phone consent screen lists exactly `Mail.Read` (read) or `Mail.ReadWrite` + `Mail.Send` (write) and **not** "Maintain access to data you have given it access to" (that is `offline_access`)
+- [ ] After unlock, `wrangler tail` shows no token, address or mail content
+- [ ] Read-only Outlook session shows no Compose/Reply/Flag/Archive/Delete buttons
+- [ ] Delete moves the conversation to Deleted Items (it can be found there in Outlook); nothing is permanently deleted
+- [ ] Reply goes to the address shown as "Outlook sends this reply to"
+- [ ] Outlook DONE, then the old capability returns 401 (`session_expired`)
+- [ ] Outlook capability cannot open Gmail/Spotify routes and vice versa (covered by automated tests; spot check in the Network tab)

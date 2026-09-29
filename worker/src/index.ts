@@ -1,11 +1,12 @@
 import type { Env } from "./env";
 import type { RouteCtx } from "./ctx";
-import { APPS, scopesFor } from "./apps";
+import { APPS, scopesFor, type VendorId } from "./apps";
 import { HttpErr, Bad } from "./errors";
 import { ipKey, uaLabel } from "./security";
-import { VENDORS, configured, creds, exchange } from "./vendors";
+import { VENDORS, authUrlFor, configured, creds, exchange } from "./vendors";
 import { handleGmail } from "./gmail";
 import { handleSpotify } from "./spotify";
+import { handleOutlook } from "./outlook";
 
 export { Store } from "./store";
 
@@ -54,7 +55,7 @@ export default {
     if (p === "/health") {
       return new Response(JSON.stringify({
         ok: true,
-        configured: { tokenKey: !!env.TOKEN_KEY, google: configured(env, "google"), spotify: configured(env, "spotify"), player: playerState === "ok" && configured(env, "spotify") },
+        configured: { tokenKey: !!env.TOKEN_KEY, google: configured(env, "google"), microsoft: configured(env, "microsoft"), spotify: configured(env, "spotify"), player: playerState === "ok" && configured(env, "spotify") },
       }), { headers: { ...SEC, "Content-Type": "application/json" } });
     }
 
@@ -125,9 +126,9 @@ export default {
       }
 
       // ---------------- OAuth (phone browser navigations) ----------------
-      if ((m = p.match(/^\/oauth\/(google|spotify)$/)) && req.method === "GET") {
+      if ((m = p.match(/^\/oauth\/(google|spotify|microsoft)$/)) && req.method === "GET") {
         if (!(await lim("oauth", 20))) return page("Too many requests", 429);
-        const vendor = m[1] as "google" | "spotify";
+        const vendor = m[1] as VendorId;
         const b = await store.begin(u.searchParams.get("tx") || "", u.searchParams.get("n") || "");
         if (!b || b.vendor !== vendor || !configured(env, vendor) || (b.access === "stream" && playerState !== "ok")) return redirect(`${env.FRONTEND_URL}#/p/x/error?r=expired`);
         const cr = creds(env, vendor);
@@ -136,11 +137,11 @@ export default {
           scope: scopesFor(b.app, b.access), state: b.state,
           code_challenge: b.challenge, code_challenge_method: "S256", ...VENDORS[vendor].extra,
         });
-        return redirect(VENDORS[vendor].authUrl + "?" + q);
+        return redirect(authUrlFor(env, vendor) + "?" + q);
       }
-      if ((m = p.match(/^\/oauth\/(google|spotify)\/callback$/)) && req.method === "GET") {
+      if ((m = p.match(/^\/oauth\/(google|spotify|microsoft)\/callback$/)) && req.method === "GET") {
         if (!(await lim("cb", 20))) return page("Too many requests", 429);
-        const vendor = m[1] as "google" | "spotify";
+        const vendor = m[1] as VendorId;
         const s = await store.takeState(u.searchParams.get("state") || "");
         if (!s) return redirect(`${env.FRONTEND_URL}#/p/x/error?r=state`);
         const base = s.access === "stream" ? (env.PLAYER_URL as string) : env.FRONTEND_URL; // send the phone back to the site that showed the QR
@@ -149,7 +150,7 @@ export default {
         const code = u.searchParams.get("code");
         if (u.searchParams.get("error") || !code) { await store.fail(s.id); return back("denied"); }
         let ex;
-        try { ex = await exchange(env, vendor, code, s.verifier); }
+        try { ex = await exchange(env, vendor, code, s.verifier, scopesFor(s.app, s.access)); }
         catch { await store.fail(s.id); return back("failed"); }
         const r = await store.approve(s.id, ex);
         if (r === "scope") return back("scope");
@@ -166,6 +167,7 @@ export default {
       try {
         if (p.startsWith("/gmail/")) return await handleGmail(c);
         if (p.startsWith("/spotify/")) return await handleSpotify(c);
+        if (p.startsWith("/outlook/")) return await handleOutlook(c);
       } catch (e) {
         // The vendor rejected our token: the session is useless, remove it.
         if (e instanceof HttpErr && e.status === 401 && bearer) await store.revoke(bearer);

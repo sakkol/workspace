@@ -12,10 +12,15 @@ GOOGLE_REDIRECT_URI = "https://sakkol-relay.serdarakkol.workers.dev/oauth/google
 # Spotify is optional. Leave SPOTIFY_CLIENT_ID empty to deploy Gmail only; fill it in when you do SETUP-STEPS.md step 4.
 SPOTIFY_CLIENT_ID = "e669c61d78b84debb8612becc42cb64c"
 SPOTIFY_REDIRECT_URI = "https://sakkol-relay.serdarakkol.workers.dev/oauth/spotify/callback"
+# Outlook (v3) is optional. Leave MICROSOFT_CLIENT_ID empty to deploy without it; fill it in when you do SETUP-STEPS.md Phase 6.
+# MICROSOFT_TENANT: "consumers" = personal accounts only (hotmail.com, outlook.com, live.com).
+MICROSOFT_CLIENT_ID = "a7877014-b586-4355-9794-422ec85e6716"
+MICROSOFT_REDIRECT_URI = "https://sakkol-relay.serdarakkol.workers.dev/oauth/microsoft/callback"
+MICROSOFT_TENANT = "consumers"
 PLAYER_ORIGIN = "https://sakkol-player.github.io"
 PLAYER_URL = "https://sakkol-player.github.io/player/"
 # Secrets (NEVER put these here). Set with `npx wrangler secret put NAME`:
-#   TOKEN_KEY, GOOGLE_CLIENT_SECRET, SPOTIFY_CLIENT_SECRET
+#   TOKEN_KEY, GOOGLE_CLIENT_SECRET, SPOTIFY_CLIENT_SECRET, MICROSOFT_CLIENT_SECRET
 
 [[durable_objects.bindings]]
 name = "STORE"
@@ -37,6 +42,9 @@ new_sqlite_classes = ["Store"]
 # GOOGLE_REDIRECT_URI = "https://sakkol-relay-staging.serdarakkol.workers.dev/oauth/google/callback"
 # SPOTIFY_CLIENT_ID = ""
 # SPOTIFY_REDIRECT_URI = "https://sakkol-relay-staging.serdarakkol.workers.dev/oauth/spotify/callback"
+# MICROSOFT_CLIENT_ID = ""
+# MICROSOFT_REDIRECT_URI = "https://sakkol-relay-staging.serdarakkol.workers.dev/oauth/microsoft/callback"
+# MICROSOFT_TENANT = "consumers"
 # [[env.staging.durable_objects.bindings]]
 # name = "STORE"
 # class_name = "Store"

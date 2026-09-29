@@ -36,7 +36,7 @@ export class Store extends DurableObject<Env> {
   claimToken(id: string, secret: string) { return this.core.claimToken(id, secret); }
   auth(cap: string, app: AppId, touch = true) { return this.core.auth(cap, app, touch); }
   revoke(cap: string) { return this.core.revoke(cap); }
-  sendSlot(cap: string) { return this.core.sendSlot(cap); }
+  sendSlot(cap: string, app: AppId = "gmail") { return this.core.sendSlot(cap, app); }
   async hit(key: string, limit: number, windowMs: number) { return this.core.hit(key, limit, windowMs); }
   alarm() { return this.core.alarm(); }
 }

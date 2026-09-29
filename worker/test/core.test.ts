@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { approvedTx, CTX, newSecret, setup } from "./helpers";
 import { CODE_TRIES, MAX_PENDING, MAX_SENDS, TX_TTL } from "../src/core";
+import { scopesFor } from "../src/apps";
 
 describe("link transaction", () => {
   it("rejects bad app / access / claim hash", async () => {
@@ -214,7 +215,7 @@ describe("rate limiting", () => {
 });
 
 describe("stream (web player) transactions", () => {
-  const STREAM_SCOPE = "streaming user-read-email user-read-private user-read-playback-state user-modify-playback-state";
+  const STREAM_SCOPE = scopesFor("spotify", "stream"); // was stale after the library-browsing scopes were added to the player
   it("claimToken returns the token once, needs the claim secret, and leaves no session or token behind", async () => {
     const s = setup(); const a = await approvedTx(s, "spotify", "stream", STREAM_SCOPE);
     expect(a.res).toBe("ok");

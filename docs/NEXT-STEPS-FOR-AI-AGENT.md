@@ -2,7 +2,7 @@
 
 **Audience:** an AI coding agent (chatbot) that will extend this repository, one version at a time.
 **Owner:** the person who runs this workspace on untrusted shared computers (usually in an incognito window).
-**Versions covered:** v2.1 (Spotify in-tab) → v3 (Google Keep) → v4 (Notion) → v5 (Google Drive) → v6 (Google Calendar).
+**Versions covered:** v2.1 (Spotify web player, **BUILT**) → v3 (**Outlook email, BUILT**; see docs/SECURITY.md v3 addendum) → v4 (Notion) → v5 (Google Drive) → v6 (Google Calendar). Google Keep was dropped from the roadmap (its API is Workspace-only).
 
 ---
 
@@ -10,7 +10,7 @@
 
 1. **Read this whole document and the code before writing anything.** Read `docs/SECURITY.md`, `docs/API.md`, `docs/SECURITY-REVIEW-v1.md`, `worker/src/core.ts`, `worker/src/index.ts`, `worker/src/apps.ts`, `worker/src/vendors.ts`, `worker/src/gmail.ts`, `web/src/core/*`.
 2. **One version per session, in order.** Finish, test and document a version before starting the next. Do not "prepare" later versions inside an earlier one.
-3. **Feasibility gates are real.** Some requested apps may not be possible without breaking the security model (see v3). When a gate fails, stop and tell the owner; do not work around it.
+3. **Feasibility gates are real.** Some requested apps may not be possible without breaking the security model (see the "verify / ask the owner first" notes in each version). When a gate fails, stop and tell the owner; do not work around it.
 4. **Stop and ask** (do not guess) when: a rule in section 2 would have to be bent; a vendor's current docs contradict this document; a scope, permission or data flow is not described here; the owner must choose between security and convenience.
 5. **Never ask the owner to paste secrets into the chat.** Give them commands to run themselves (`npx wrangler secret put NAME`).
 6. **Do not invent API details.** This document was written from knowledge that may be out of date. Every "verify" note means: read the vendor's current official documentation first and record what you found in the version's PR description.
@@ -42,11 +42,15 @@
 | App and vendor registries | `worker/src/apps.ts`, `worker/src/vendors.ts` | one entry per app / OAuth vendor |
 | Routes | `worker/src/index.ts`, `gmail.ts`, `spotify.ts`, `mime.ts` | |
 | Tests | `worker/test/` (core, mime, security, router) and `web/test/` | Run: `cd worker && npm test`, `cd web && npm test` |
-| Docs | `README.md`, `SETUP-STEPS.md`, `docs/*` | |
+| Docs | `README.md`, `SETUP-STEPS.md`, `SETUP-STEPS-v2.1.md`, `docs/*` | |
+| **Spotify web player (separate repo)** | `sakkol-player` (own repo in a **GitHub organization**, own origin, e.g. `https://sakkol-player.github.io/player/`) | v2.1. Own Vite build, own CSP, own deploy workflow. `src/core/dom.ts`, `src/core/crypto.ts`, `test/crypto.test.ts` are **copies** of the workspace files: keep them in sync |
+| Workspace page widgets | `web/src/widgets/*`, `web/src/config.ts` | Clock, timer, quick links. **`config.ts` is the only file the owner edits** to change links and extra clocks |
 
 **Implemented already (do not redo):**
 - Gmail read-only **or** read & write; **inbox tabs (Inbox/Primary, Promotions, Updates)** and **conversation view** (whole thread in one chain, older messages collapsed, quoted history folded).
 - Spotify **remote control** (music plays on the owner's own device; no Spotify token in the browser).
+- **Spotify web player in a browser tab (v2.1)**, see the v2.1 section.
+- **Workspace page widgets:** clock (12/24 h, optional extra time zones), countdown timer (presets + custom, keeps running across screens, header chip, alarm sound scheduled on the audio clock so it works in background tabs, tab-title countdown), and owner-configured quick links (https only, `noopener noreferrer`). All in memory, nothing stored. Quick links are static owner config and are the only clickable links in the app; vendor content stays non-clickable (R12).
 - Security fixes from the v1 review: claim secret, typed verification code, scope/lifetime validation, vendor revocation, token encryption at rest, in-memory rate limits, frame-buster, lockfiles.
 
 ### 1.1 How linking works today (you will extend this)
@@ -73,7 +77,7 @@ These carry over from spec v1.2 and the v1 review. **If a task seems to require 
 **OAuth**
 - **R5.** Authorization Code flow with **PKCE S256** and a per-transaction single-use `state`, exact registered redirect URIs, on the phone only. The phone page never collects a vendor password.
 - **R6.** Never request offline access or keep refresh tokens. If a vendor returns one (Spotify does; Notion may), **discard it** and set `expectsRefreshToken: true` for that vendor so it is not logged as an error. Never log token values.
-- **R7.** **Never set `include_granted_scopes`.** Never merge scopes into a token except through the explicit bundle mechanism defined in v3, and then only for apps of the *same vendor* the owner chose in the same unlock.
+- **R7.** **Never set `include_granted_scopes`.** Never merge scopes into a token except through the optional Google bundle mechanism described under v5, and then only for apps of the *same vendor* the owner chose in the same unlock.
 - **R8.** Request the **minimum scopes**. Verify at callback that **every requested scope was granted** (users can untick scopes). Default access level is **read-only**; write access is an explicit per-unlock choice shown on the phone.
 - **R9.** Session lifetime = `min(app maximum, token lifetime − 60 s)`. The Relay is authoritative; browser timers are UX only. Idle timeouts measure **human** activity only: background polling routes must be marked passive **on the server**, never by a client header.
 
@@ -94,9 +98,10 @@ These carry over from spec v1.2 and the v1 review. **If a task seems to require 
 - **R19.** Logs must never contain tokens, codes, capabilities, PKCE verifiers, or vendor content (mail, notes, files, events, tracks). Log only event types and reason categories.
 - **R20.** **Fail closed**: missing secret/config means an explicit "not configured" error, never a fallback to weaker behaviour (see `configured()` and the `TOKEN_KEY` check).
 - **R21.** Minimise dependencies. New runtime dependencies need a written justification; commit lockfiles; use `npm ci`. Prefer the platform (`fetch`, WebCrypto).
-- **R22.** **Forbidden approaches:** unofficial/undocumented APIs; libraries that need the owner's Google password, app passwords or "master tokens" (this rules out unofficial Google Keep libraries); scraping; browser extensions; any flow that asks for a vendor password on the shared computer.
+- **R22.** **Forbidden approaches:** unofficial/undocumented APIs; libraries that need the owner's Google password, app passwords or "master tokens" (this rules out unofficial Google Keep libraries and IMAP/SMTP logins with passwords or app passwords for Outlook); scraping; browser extensions; any flow that asks for a vendor password on the shared computer.
 - **R23.** Tokens at rest are AES-GCM sealed with the record key as AAD (`hooks.seal/open`). New stored token fields must go through the same path.
 - **R24.** Keep `worker/src/core.ts` free of Cloudflare imports so its logic stays unit-testable.
+- **R26.** **Owner preference: the Relay keeps no refresh token and no account information.** Do not store, log or return the user's email address, name, id or country, and do not call identity endpoints (`/me`, `userinfo`, Spotify profile) unless a feature strictly needs them. Anything a vendor hands over that is not needed is discarded.
 - **R25.** **Spec conflict procedure:** write a note titled `SPEC CONFLICT` (what you need, which rule it touches, options with trade-offs), stop, and ask the owner. Do not silently change the security model.
 
 ### 2.1 Test requirements
@@ -108,10 +113,12 @@ Every new rule you implement gets a test. Minimum for a new app: unlock happy pa
 
 | # | Decision | Applies to |
 |---|---|---|
-| **E1** | For the **Spotify in-tab player only** (v2.1): the Spotify access token (≤ 1 h) may live in the browser **of the isolated player origin**, in JavaScript memory and optionally mirrored to `sessionStorage` (never `localStorage`, cookies or IndexedDB) with an expiry timestamp so a page refresh in the same tab does not stop playback. The owner uses this in an incognito tab. The Spotify **capability** may be mirrored the same way. Both are deleted on Lock, on expiry and when the token is rejected. | v2.1 only |
-| E2 | The owner wants **Google Keep to unlock together with Gmail** (no second QR scan). Implemented through the bundle mechanism in v3. **Gate:** only if Keep is technically possible (see v3). | v3 |
-| E3 | Order of work: v2.1, v3, v4, v5, v6. | all |
+| **E1** | **In use (v2.1 is built).** For the **Spotify in-tab player only**: the Spotify access token (≤ 1 h) may live in the browser **of the isolated player origin**, in JavaScript memory and optionally mirrored to `sessionStorage` (never `localStorage`, cookies or IndexedDB) with an expiry timestamp so a page refresh in the same tab does not stop playback. The owner uses this in an incognito tab. The Spotify **capability** may be mirrored the same way. Both are deleted on Lock, on expiry and when the token is rejected. | v2.1 only |
+| E2 | **Outlook email replaces Google Keep as v3.** It is a different vendor (Microsoft), so it is its own unlock with its own QR scan and is **never bundled** with Gmail (R7). | v3 |
+| E3 | Order of work: v2.1 (done), v3 Outlook, v4 Notion, v5 Drive, v6 Calendar. | all |
 | E4 | Default access level is read-only; write is an explicit choice on the launcher tile. | all |
+| E5 | No Cloudflare Pages. Extra sites are hosted on GitHub Pages under a separate free GitHub organization (a separate origin). | hosting |
+| E6 | Owner uses the workspace in incognito/InPrivate windows on shared computers. | all |
 
 Everything else stays as in spec v1.2 plus `docs/SECURITY.md`.
 
@@ -130,73 +137,66 @@ Everything else stays as in spec v1.2 plus `docs/SECURITY.md`.
 
 ## 5. Version specifications
 
-### v2.1: Spotify inside the tab (Web Playback SDK)
+### v2.1: Spotify web player in a browser tab: BUILT
 
-> **STATUS: IMPLEMENTED.** Deviations from the design below (owner's choices): the player is hosted on a **GitHub organization Pages site** (not Cloudflare Pages); the token is **delivered once at claim** to the player origin (`claimToken`, access level `stream`), so there is **no capability, no Relay session and no `/spotify/sdk-token` route**; the QR/code are shown **in the player site**, which the workspace opens in a new tab (no iframe, no cross-site messages); `sessionStorage` mirroring is **opt-in** (default off). See `docs/SECURITY.md` (v2.1 addendum) and `SETUP-STEPS-v2.1.md`. Treat the text below as design history.
+**Do not redo this. Do not weaken it.** Read `docs/SECURITY.md` (v2.1 addendum) and `SETUP-STEPS-v2.1.md`.
 
-**Goal:** the shared computer's own tab becomes a Spotify player (audio from that browser), so the owner does not need Spotify open on another device. Keep the existing remote-control mode.
+What exists:
+- Workspace launcher: the Spotify tile offers **Web player (opens a new tab)** and **Remote control**. The web-player option does `window.open(VITE_PLAYER_URL, "_blank", "noopener,noreferrer")`. No token, capability or `postMessage` passes between the two sites.
+- **Player site** (`sakkol-player`, separate repo, GitHub organization Pages, its own origin): shows the QR + code, phone flow, claims the token once, loads Spotify's SDK **only after unlock** (never on QR/phone pages), checks Widevine DRM first, runs the player, search and play through Spotify's Web API directly with the token. Locks on DONE, on token expiry, after 30 minutes without click/key, or when Spotify rejects the token. Optional `sessionStorage` mirror, **off by default** (owner ticks "Keep me unlocked").
+- **Relay:** access level `stream` for `spotify` (scopes `streaming user-read-email user-read-private user-read-playback-state user-modify-playback-state`). `claimToken()` hands the token over **once** to the holder of the claim secret and stores nothing: no session, no capability, no refresh token, no account info (R26). `PLAYER_ORIGIN` / `PLAYER_URL` config. **Origin rules:** only `PLAYER_ORIGIN` may start/claim `stream`; the workspace origin may start everything else and can never claim a stream token; the player origin may call only `/link/*`. If `PLAYER_ORIGIN` equals `FRONTEND_ORIGIN` or is unset the player is refused (`player_not_isolated` / `player_not_configured`). The phone is redirected back to the site that showed the QR. `/health` reports `player`.
+- Player CSP: scripts only from itself and `sdk.scdn.co`; `connect-src` only the Relay and Spotify hosts (limits exfiltration by the third-party script); images only Spotify CDN. `style-src 'unsafe-inline'` is allowed for Spotify's injected styles.
 
-**Why this needs care:** the SDK is JavaScript loaded from `sdk.scdn.co` and needs an access token in the page. Anything in the same JavaScript context or same **origin** as that script can be read by it. The main origin holds the Gmail (and future) capabilities, so **the SDK must never run in the main origin.**
+Known limits (accepted by the owner): no early revocation (Spotify has no revoke endpoint); the token expires in about an hour and the Relay keeps no refresh token, so the owner scans again hourly; the token can read the account's email/country (SDK-required scopes); Premium required; Spotify Development Mode limits (owner Premium, at most 5 users, search 10 results); Firefox private windows disable DRM; the CSP was written without a live browser test, so the first real run may need a host added (the console shows "Refused to ...").
 
-**Design (required properties; implementation details are yours):**
-1. **Separate origin for the player**, for example a Cloudflare Pages project (`sakkol-player.pages.dev`). **A second GitHub Pages site under the same account is NOT isolated**: all `*.github.io/…` paths of one account share an origin. Alternative to evaluate: a `sandbox="allow-scripts"` iframe *without* `allow-same-origin` (opaque origin). Prototype both; the SDK may not work inside a sandboxed opaque origin (storage/EME). Report what you found before choosing.
-2. The player origin is its **own tiny app** (separate Vite entry/build, no Gmail code): it runs the same unlock flow (QR, claim secret, typed code) for app `spotify` with a new access level **`stream`**, holds only Spotify credentials (E1), and the phone page for that flow is served by the player origin too.
-3. The main app embeds the player origin in an `<iframe allow="autoplay; encrypted-media">` (or opens it in a new tab). **No capability or token is ever sent between origins.** No `postMessage` carrying credentials in either direction; messages may only carry non-sensitive UI state (e.g. "locked").
-4. Relay:
-   - New access level `stream` for `spotify` with scopes `streaming user-read-email user-read-private user-read-playback-state user-modify-playback-state` (the SDK requires the first three; note that they expose the owner's email and country to the token holder, so `stream` must be an explicit choice and shown on the phone).
-   - New route `POST /spotify/sdk-token` (only for sessions with access `stream`): returns `{token, expiresInMs}`. This is the **only** place a provider token ever leaves the Relay. Rate-limit it (e.g. 20/min), never log the response, `Cache-Control: no-store`.
-   - **Origin ↔ app rules (R-multiorigin):** introduce `PLAYER_ORIGIN`. `FRONTEND_ORIGIN` may use every app **except** `spotify` with `access: "stream"`; `PLAYER_ORIGIN` may use **only** `spotify`. Enforce in the router with tests (wrong origin gets 403). CORS answers with the specific matching origin, never `*`. The phone endpoints (`/link/info|confirm|cancel`) accept both origins because the phone opens the origin that displayed the QR.
-   - Session limits for `stream`: `maxLifeMs` 45 min (token lasts about 60 min), idle handled as for the remote mode.
-5. Player origin hardening: its own CSP (build it minimally by testing; expected: `script-src 'self' https://sdk.scdn.co`, `frame-src https://sdk.scdn.co`, `connect-src` the Relay plus Spotify's API/WebSocket hosts, `img-src https://i.scdn.co`, `media-src` as the SDK requires; write down every host you had to add and why), `frame-ancestors` = main origin only (Cloudflare Pages `_headers`), `Referrer-Policy: no-referrer`, the same frame-buster logic where framing is not intended. The SDK script cannot be pinned with SRI; this residual risk is accepted **only because** the origin is isolated and holds only Spotify credentials.
-6. Lock/expiry: `player.disconnect()`, delete token + capability from memory and `sessionStorage` (E1), call `POST /session/revoke`. If the SDK reports an authentication error, drop everything.
-7. Browser realities to test and report: Premium account required for the SDK; autoplay policy needs a user click (`activateElement()`); DRM (EME/Widevine) availability in the owner's incognito browser (Firefox private windows may disable DRM; check); Spotify Development Mode limits (owner Premium, ≤ 5 users) still apply.
-
-**Acceptance criteria**
-- [ ] Main origin contains no reference to `sdk.scdn.co` (grep the build output).
-- [ ] A Gmail capability cannot reach `/spotify/sdk-token`; a `stream` capability cannot reach `/gmail/*`.
-- [ ] Requests from the wrong origin for an app are rejected (tests).
-- [ ] Token appears only in the `/spotify/sdk-token` response, nowhere in logs, URLs, redirects or other responses.
-- [ ] After Lock, `sessionStorage` of the player origin holds no token or capability.
-- [ ] Playback works in the owner's incognito window (or a documented limitation is reported).
-- [ ] Remote-control mode still works unchanged.
-
-**Owner steps to document:** create the Cloudflare Pages project, set `PLAYER_ORIGIN`, add the player's redirect is **not** needed (OAuth returns to the Relay), add `PLAYER_ORIGIN` to the Relay `[vars]`, redeploy.
+Guard-rails for future work touching this: keep the tests in `worker/test/core.test.ts` ("stream (web player) transactions") and `worker/test/router.test.ts` ("spotify web player (isolated origin)"); keep the three origin rules; never load third-party scripts in the workspace origin; never let the workspace claim a stream token.
 
 ---
 
-### v3: Google Keep, unlocked together with Gmail
+### v3: Outlook email (Microsoft Graph): BUILT
 
-#### Feasibility gate (do this first, before writing code)
-As of the last check for this document, Google's **Keep API is available only to Google Workspace (enterprise/education) customers**; it is not offered to personal `@gmail.com` accounts, and the documented authorization paths are domain-wide delegation with a service account or an OAuth client approved by a Workspace administrator (scopes `https://www.googleapis.com/auth/keep` and `.../keep.readonly`). **Verify against https://developers.google.com/workspace/keep/api/guides.**
+**Status:** built for a personal Microsoft account (tenant `consumers`); plain Inbox (owner declined Focused/Other); read and read & write. Guard-rails: `worker/test/outlook.test.ts`; no MSAL, never `offline_access`, never Graph `DELETE`, never `/me`. Conversation-level routes (`/outlook/conversations/:id/(action|trash|untrash)`) were added next to the specified message-level routes so the shared conversation UI works. The original spec follows unchanged.
 
-Ask the owner: *"Is the Google account you unlock with a Workspace account whose administrator can enable the Keep API and approve the scope for your OAuth client?"*
+**Goal:** the same experience as Gmail for the owner's Outlook mailbox: read, conversation view, and (optional, explicit) send/reply/organize. Microsoft is a **new vendor** (`microsoft`), a separate unlock/QR scan, **not bundled with anything** (R7).
 
-- **No (personal account):** **do not build Keep.** Do **not** use unofficial Keep libraries (they rely on passwords/master tokens: forbidden by R22). Report this and propose alternatives that work with personal accounts and the same Google vendor: **Google Tasks** (`https://www.googleapis.com/auth/tasks`, checklists/notes-like tasks) or notes stored via Drive (v5). Implement the *bundle mechanism* below with the alternative app, if the owner agrees.
-- **Yes (Workspace):** proceed. Note that domain-wide delegation with a service account is **not** allowed here (it would put a key that can impersonate users on the Relay, breaking the single-user OAuth model). Use user OAuth with an admin-approved client only. If that is impossible, stop and ask.
+#### Ask the owner and verify first (before coding)
+1. **Which account type?** A personal Microsoft account (outlook.com, hotmail.com, live.com) or a Microsoft 365 work/school account? This decides the tenant setting (`consumers`, `organizations` or `common`) and whether consent is possible: work tenants can require **admin consent**, block apps from **unverified publishers**, or enforce **conditional access**. If work/school: ask whether an admin can approve; if not, stop and report.
+2. **Read Microsoft Learn** and record what you found: v2.0 authorize/token endpoints; PKCE support for a web app that also has a client secret; delegated Mail permissions; access-token lifetime (documented as roughly **60 to 90 minutes**; always use the returned `expires_in`); the behaviour of `offline_access` (refresh tokens); well-known folder names; the `Prefer: outlook.body-content-type="text"` header; `sendMail` (returns 202, no body); throttling (429 + `Retry-After`).
+3. Confirm how the owner registers an app if they only have a personal account (the Microsoft Entra admin center may create a default directory on first sign-in).
 
-#### Bundle mechanism (required for E2; also reusable for v5 and v6)
-Goal: one QR scan, one typed code, one Google consent screen, several Google apps unlocked.
-- A transaction may carry `apps: AppId[]` **all belonging to the same vendor**, each with its own access level. Scopes sent to Google = union of those apps' scopes. **Nothing else may be bundled** (never mix vendors).
-- Launcher: when unlocking Gmail, show a checkbox "Also unlock Keep" (default per owner's E2: on) with its own read/write choice. The phone confirmation screen must list **every app and access level** being granted.
-- Callback: verify **all** union scopes were granted (R8). If not, fail the whole transaction (or, if you want partial success, only unlock apps whose scopes were all granted and tell the phone user precisely; choose the simpler safe option and document it).
-- Claim returns multiple capabilities: `{caps: {gmail:{cap,ttlMs,access}, keep:{...}}}`. **One session record per app** (own capability, own timers, own limits, own write counters). Each capability is still bound to exactly one app (R4).
-- All sessions of a bundle share one Google token. Sealed copies are stored per session; add a **token-group id**. **Revoke the token at Google only when the last live session of the group ends**, otherwise locking Gmail would silently kill Keep (and vice versa). Test both orders plus expiry.
-- Update `core.ts` tests: bundle happy path, partial scope grant, group revocation, one app expiring while the other continues, wrong-app capability.
-- Document in `docs/SECURITY.md` that same-vendor bundles mean one Google token carries several scopes; the Relay's per-capability route binding is the isolation boundary (a Relay bug could cross-use scopes). This is a deliberate trade for convenience.
+#### Design
+- **Vendor `microsoft`** in `vendors.ts`: authorize `https://login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize`, token `.../oauth2/v2.0/token`; `MICROSOFT_TENANT` var; client secret **in the request body**; PKCE S256; `state`; `prompt=select_account`. **Write the plain OAuth requests yourself: do NOT use MSAL** (MSAL adds `offline_access`, `openid`, `profile`, `email` by default, which would produce a refresh token, breaking R6/R26). **The authorize URL must not contain `offline_access`** (add a test). `expectsRefreshToken: false`.
+- Config: `MICROSOFT_CLIENT_ID` (public `[vars]`), `MICROSOFT_REDIRECT_URI` (`https://sakkol-relay.serdarakkol.workers.dev/oauth/microsoft/callback`), `MICROSOFT_TENANT`, secret `MICROSOFT_CLIENT_SECRET`. Extend `Env`, `creds()`, `configured()`, `/health` (booleans), `/oauth/(google|spotify|microsoft)` routes and the callback.
+- **Scope verification needs a vendor-specific normalizer.** Microsoft's token response may list extra default scopes (`User.Read`, `profile`, `openid`, `email`), use different casing, or include the `https://graph.microsoft.com/` prefix. Today `approve()` compares exact strings: add `normalizeScope()` per vendor (lower-case, strip the prefix) and keep the rule that **every requested scope must be present**. Extra granted scopes must be tolerated and **never used**.
+- **Access levels and scopes:** `read` → `Mail.Read`; `write` → `Mail.ReadWrite Mail.Send`. **Never request:** `offline_access`, `MailboxSettings.ReadWrite` (inbox rules / auto-forward), `Mail.*.Shared`, `User.ReadWrite*`, `Directory.*`, `Contacts.*`, `Calendars.*` (that is v6, separate). Owner sees the exact list on the phone screen.
+- **Sessions:** 30 min max / 5 min idle, capped at `expires_in − 60 s`. Microsoft offers no revocation endpoint for access tokens: on Lock/expiry the Relay deletes its copy (the token never left the Relay); document that it stays valid at Microsoft until it expires. R26: do not call `/me` for identity; unread/total counts come from `GET /me/mailFolders/inbox?$select=unreadItemCount,totalItemCount`.
+- **Routes `/outlook/*` (allow-list only, capability bound to app `outlook`):**
+  - `GET /outlook/profile`: inbox counts + access level.
+  - `GET /outlook/conversations?folder=&tab=&pageToken=`: Graph has **no thread list endpoint**. Fetch messages newest first (`$top` about 50, minimal `$select`: `id, conversationId, subject, from, receivedDateTime, isRead, bodyPreview, flag, inferenceClassification`) and **group by `conversationId` on the Relay**. `folder` ∈ well-known whitelist (`inbox`, `sentitems`, `archive`, `deleteditems`, `junkemail`). Optional tabs **Focused / Other** via `inferenceClassification` (Outlook's counterpart of Gmail tabs); fall back to plain Inbox where Focused Inbox is off. **Paging:** never accept or follow a client-supplied `@odata.nextLink`: extract only the `$skiptoken`/`$skip` value, validate by regex, and rebuild the request yourself (SSRF guard).
+  - `GET /outlook/conversations/:conversationId`: `GET /me/messages?$filter=conversationId eq '<id>'` (check Graph's `$orderby` restrictions; sort by date on the Relay). **OData injection guard:** `conversationId` must match a strict regex (URL-safe base64 characters) **and** single quotes must be escaped by doubling; reject anything else.
+  - **Bodies:** send `Prefer: outlook.body-content-type="text"`. If HTML still arrives, reduce it to text (reuse the `bodyText` HTML-stripper approach); **never return HTML** (R12). Cap body size.
+  - **Write (write sessions only):** `POST /outlook/messages/:id/action` `{read|unread|flag|unflag|archive}` (PATCH `isRead`/`flag`; archive = `POST /me/messages/{id}/move` with `destinationId:"archive"`); `POST /outlook/messages/:id/trash` = **move to `deleteditems`**; `untrash` = move to `inbox`. **Never call Graph `DELETE`** (add a test that no DELETE request is ever made). `POST /outlook/send`: build the Graph JSON on the Relay (`contentType:"Text"`, recipients `{emailAddress:{address}}`, `saveToSentItems:true`), reuse `addrs()` validation (CR/LF rejected) and the same limits as Gmail (≤ 10 recipients, 150-char subject, 50 000-char body, **10 sends per session** via the Durable Object counter, 3/min). **Replies** use `POST /me/messages/{id}/reply` with `{comment}`: Outlook chooses the recipients and quotes the original, so the browser cannot choose a reply's recipients. No Bcc, attachments, forwarding, categories, rules or permanent delete.
+  - **ID validation:** Graph ids are long URL-safe strings; strict regex (`^[A-Za-z0-9_=-]{1,300}$`) and `encodeURIComponent` in paths.
+  - **Errors:** 401 → `session_expired` (and revoke the session), 403 → `outlook_forbidden`, 404, 429 (pass `Retry-After`), 5xx → `outlook_unavailable`.
+- **UI:** same look and behaviour as the Gmail app (tabs Focused/Other, folders, **conversation view** with collapsed older messages and folded quoted history via `quote.ts`, review-and-send, read-only default). Prefer extracting the shared mail UI into `web/src/apps/mail/` behind a small adapter (`list / open / act / send`) rather than copying about 300 lines; keep the Gmail behaviour and tests unchanged. Add an Outlook tile (read / read & write, default read).
+- **Owner console steps to write into `SETUP-STEPS.md`:** Microsoft Entra admin center → App registrations → New registration → supported account types per the owner's answer → Redirect URI, platform **Web**, the Relay callback above → Certificates & secrets → new client secret (**it expires; tell the owner the date and to set a reminder**) → API permissions → Microsoft Graph → Delegated → `Mail.Read`, `Mail.ReadWrite`, `Mail.Send` (personal accounts consent themselves; work accounts may need admin consent) → `npx wrangler secret put MICROSOFT_CLIENT_SECRET`, add the three public vars, redeploy, check `/health`.
 
-#### Keep functionality (Workspace only)
-- Verify the current Keep API surface. Expected: list/get notes, create notes, delete notes, and media download; no in-place editing of existing notes. Do not promise features the API lacks.
-- Default read-only: list and view notes (title, text, list items with checked state). Write mode: create text/list notes. **Delete is permanent in Keep**: either omit it or require typed confirmation, a per-session cap, and clearly warn (R14).
-- Note contents are untrusted (R12). Attachments/media: not in v3.
-- Routes under `/keep/*`, IDs validated by regex, `passive` none.
-
-**Acceptance criteria:** feasibility gate answered and recorded; single unlock yields two independent capabilities; locking one leaves the other working and the Google token alive; last lock revokes the token exactly once; all R-tests pass.
+**Acceptance criteria**
+- [ ] Authorize URL has PKCE S256, `state`, exact redirect URI, and **no** `offline_access`, `include_granted_scopes` or `client_secret`.
+- [ ] A refresh token in the token response (if any) is discarded, never stored or returned, and logged only as an event.
+- [ ] Scope normalizer tests (casing, URL prefix, extra default scopes tolerated, missing scope rejected).
+- [ ] OData-injection and SSRF/next-link tests; strict ID regex tests.
+- [ ] Read-only session cannot send, move, flag or trash; trash uses `move`, never `DELETE`.
+- [ ] Reply recipients come from Outlook, not the browser; send limits enforced; CR/LF rejected.
+- [ ] Outlook capability gets 401 on `/gmail/*`, `/spotify/*` and the reverse; Gmail and Spotify behaviour unchanged.
+- [ ] No token, address or name in any response body, redirect or log (R26, R19).
+- [ ] `docs/API.md`, `docs/SECURITY.md`, `SETUP-STEPS.md`, manual checklist updated; unverified points listed in the report.
 
 ---
 
 ### v4: Notion
 
-**Goal:** search and read pages; optionally create a page or append text.
+**Goal:** search and read pages, create a page and append text.
 
 **Verify first (Notion docs, https://developers.notion.com):** current OAuth endpoints, whether the token endpoint requires HTTP Basic auth with a JSON body (historically yes), whether **PKCE** is supported, whether access tokens now **expire** and come with **rotating refresh tokens** (reports in 2026 suggest yes), whether there is a **token revocation** endpoint, current `Notion-Version` header, and rate limits (about 3 requests/second average). Record findings.
 
@@ -215,7 +215,16 @@ Goal: one QR scan, one typed code, one Google consent screen, several Google app
 
 ### v5: Google Drive
 
-**Goal:** browse, search and preview files. Google vendor (can join the v3 bundle mechanism if the owner wants one scan for Gmail + Drive; ask).
+**Goal:** browse, search and preview files. Google vendor. Optionally joins the **Google bundle mechanism** (below) if the owner wants one QR scan for Gmail + Drive; ask.
+
+#### Optional: Google bundle mechanism (one scan for several Google apps; reused by v6)
+Only for apps of the **same vendor** (Google). Never bundle across vendors (Outlook, Spotify and Notion always unlock separately).
+- A transaction may carry `apps: AppId[]`, each with its own access level. Scopes sent to Google = the union of those apps' scopes. Launcher: checkboxes "Also unlock Drive / Calendar" (default off unless the owner says otherwise). The phone screen lists **every app and access level** being granted.
+- Callback: verify **all** union scopes were granted (R8); if not, fail the whole transaction (simplest safe option; document it).
+- Claim returns several capabilities: `{caps: {gmail:{cap,ttlMs,access}, drive:{...}}}`. **One session record per app** (own capability, timers, limits, write counters). Each capability stays bound to exactly one app (R4).
+- The sessions of a bundle share one Google token. Store sealed copies per session plus a **token-group id**, and **revoke the token at Google only when the last live session of the group ends**; otherwise locking Gmail would silently kill Drive. Test both orders and expiry.
+- Tests: happy path, partial scope grant, group revocation, one app expiring while another continues, wrong-app capability.
+- `docs/SECURITY.md`: a bundle means one Google token carries several scopes; per-capability route binding is the isolation boundary.
 
 **Scopes (choose the least that works; explain):**
 - `https://www.googleapis.com/auth/drive.metadata.readonly`: names, folders, types (good default for browsing).
@@ -238,7 +247,7 @@ Goal: one QR scan, one typed code, one Google consent screen, several Google app
 
 ### v6: Google Calendar
 
-**Goal:** agenda (today/week), event details; optional create/edit/delete events in write mode. Google vendor (bundle-capable).
+**Goal:** agenda (today/week), event details; optional create/edit/delete events in write mode. Google vendor (bundle-capable, see v5).
 
 **Scopes (verify current names and sensitivity):** `https://www.googleapis.com/auth/calendar.events.readonly` or `calendar.readonly` for read; `https://www.googleapis.com/auth/calendar.events` for write. Listing the owner's calendars may need a separate read scope; request only what the UI uses.
 
@@ -258,10 +267,10 @@ Goal: one QR scan, one typed code, one Google consent screen, several Google app
 
 | When | Task |
 |---|---|
-| v2.1 | Multi-origin CORS (`FRONTEND_ORIGIN` + `PLAYER_ORIGIN`) with per-app origin rules; second frontend entry/build and deploy workflow |
-| v3 | Bundle mechanism (`apps[]`, multi-capability claim, token groups, group-aware revoke) |
+| v2.1 (done) | Multi-origin CORS (`FRONTEND_ORIGIN` + `PLAYER_ORIGIN`) with per-app origin rules; separate player repo and deploy workflow |
+| v3 | New vendor `microsoft` (plain OAuth, no MSAL, scope normalizer, no `offline_access`); Outlook routes; shared mail UI extraction |
 | v4 | `noScopes` apps, JSON token exchange, optional per-access-level client credentials |
-| v5, v6 | Reuse the bundle mechanism; add app-specific caps |
+| v5, v6 | Optional Google bundle mechanism (`apps[]`, multi-capability claim, token groups, group-aware revoke); add app-specific caps |
 | every version | Launcher tile state (locked/unlocked/coming soon), phone screen text listing exact access, wipers on lock, `docs/*`, `SETUP-STEPS.md` |
 | after v6 | Optional: per-send phone approval for Gmail; unlock-several-at-once UX polish |
 
@@ -279,6 +288,10 @@ Goal: one QR scan, one typed code, one Google consent screen, several Google app
 - **Google OAuth:** app is in *Testing* mode with the owner as test user; restricted scopes (`gmail.modify`, `drive.readonly`) are allowed there; consent shows an "unverified app" warning; each new scope requires adding it under Data Access.
 - **Gmail inbox tabs** rely on Gmail's `CATEGORY_*` labels. If the owner disables tabs in Gmail, the Primary tab will be empty; do not silently fall back to another query.
 - **Spotify Development Mode:** owner needs Premium; max 5 authorized users; search limited to 10; some endpoints were removed in the February 2026 migration. Always check the live docs.
+- **Two front-end origins now exist** (workspace and player). Never merge them; never point `PLAYER_ORIGIN` at `sakkol.github.io`. A repo under the same GitHub account shares the workspace origin.
+- **GitHub Pages must publish the Vite build, not the repo files.** Source must be "GitHub Actions" and `.github/workflows/deploy.yml` must exist. A default Jekyll workflow publishes unbuilt `src/main.ts` (blank page, console shows `video/mp2t` and a literal `%VITE_RELAY_URL%`). Hidden `.github` folders are easy to lose when copying files by hand.
+- **Copied files:** `dom.ts`, `crypto.ts`, `crypto.test.ts` exist in both the workspace and the player repo. Change both.
+- **Timer/clock widgets** keep their state only in memory (R1). Browsers throttle timers in background tabs, so the timer computes from timestamps and the alarm sound is scheduled on the audio clock.
 - **Staging:** a second Worker (`--env staging`) plus Vite on a LAN IP lets the phone leg be tested without touching production (see `SETUP-STEPS.md`).
 
 ---

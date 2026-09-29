@@ -1,6 +1,7 @@
 import type { RouteCtx } from "./ctx";
 import { HttpErr, Bad } from "./errors";
 import { buildRaw, parseOutgoing } from "./mime";
+import { htmlToText } from "./text";
 
 const ID = /^[\w-]{1,64}$/;
 // Tabs: Inbox = Primary. Gmail combines several labelIds with AND.
@@ -50,11 +51,7 @@ export function bodyText(payload: any, max = 200_000): string {
   if (plain) return dec(plain.body.data).slice(0, max);
   const html = usable("text/html");
   if (!html) return "(no readable text content)";
-  return dec(html.body.data)
-    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, "")
-    .replace(/<(br|\/p|\/div|\/tr|\/li)[^>]*>/gi, "\n")
-    .replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/\n{3,}/g, "\n\n").trim().slice(0, max);
+  return htmlToText(dec(html.body.data), max);
 }
 
 const summary = (g: any) => ({

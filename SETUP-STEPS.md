@@ -77,6 +77,7 @@ If Spotify says the redirect/secret is invalid, re-check the exact URI. If the t
 2. Gmail **Read only**: scan, type the code on the phone, approve on Google. Inbox loads; no Compose button.
 3. Lock, unlock Gmail **Read & write**: send yourself a message, reply, star, archive, trash.
 4. (If configured) Spotify: search, play, pause, volume, choose device.
+4b. (If configured) Outlook: Read only first (list, open a conversation), then Read & write (reply to yourself, flag, archive, delete = moves to Deleted Items).
 5. Run the checklist in `docs/SECURITY.md`.
 6. Clean up when done testing on a real shared machine: remove Sakkol at https://myaccount.google.com/permissions and https://www.spotify.com/account/apps.
 
@@ -88,6 +89,32 @@ If Spotify says the redirect/secret is invalid, re-check the exact URI. If the t
 5. Open `http://192.168.1.50:5173` on the computer, scan with the phone on the same Wi-Fi.
 
 **Rollback:** `git revert` the merge and let Pages redeploy; `cd worker && npx wrangler rollback`. The Durable Object cleans out incompatible v1 records automatically.
+
+---
+
+## Phase 6: Outlook / Hotmail (v3, optional)
+
+Account type: **personal Microsoft account** (hotmail.com). Tenant `consumers` is already set in `wrangler.toml`. You need about 15 minutes. Do these yourself; never paste secrets into a chat.
+
+1. Open https://entra.microsoft.com and sign in with `serdarakkol@hotmail.com`. Microsoft may create a small default directory for you on first sign-in; accept that. **If the portal insists on an Azure subscription, payment card or phone verification, stop and tell your assistant.**
+2. **Entra ID > App registrations > New registration**
+   - Name: `Sakkol Workspace Outlook`
+   - Supported account types: **Personal Microsoft accounts only**
+   - Redirect URI: platform **Web**, value `https://sakkol-relay.serdarakkol.workers.dev/oauth/microsoft/callback` (exact, https)
+   - Register.
+3. On the app's **Overview** page copy **Application (client) ID** into `worker/wrangler.toml` as `MICROSOFT_CLIENT_ID = "..."` (public value; it is not a secret).
+4. **Certificates & secrets > New client secret.** Choose the longest expiry offered (max 24 months). Copy the secret **Value** (not the "Secret ID") right away; it is shown once. **Write the expiry date in your calendar with a reminder one month before**: after that date Outlook stops unlocking until you repeat this step and step 6.
+5. **API permissions > Add a permission > Microsoft Graph > Delegated permissions**: tick exactly `Mail.Read`, `Mail.ReadWrite`, `Mail.Send`. You may remove the default `User.Read` (the Relay does not use it). Personal accounts consent themselves, so there is no "grant admin consent" step.
+6. Store the secret and deploy:
+   ```bash
+   cd worker && npx wrangler secret put MICROSOFT_CLIENT_SECRET
+   npx wrangler deploy
+   ```
+7. Open `https://sakkol-relay.serdarakkol.workers.dev/health`: `"microsoft":true`. Commit the `wrangler.toml` change and push (the frontend build picks up the new Outlook tile).
+8. First unlock: tile **Outlook** > Read only > scan with the phone > type the code > Microsoft's own page asks you to sign in and approve. Check that the list says only *Read your mail* (and, for Read & write, *Read and write access to your mail* and *Send mail as you*). If it also says *Maintain access to data you have given it access to*, stop: that means `offline_access` is being requested, which must never happen.
+9. Remove access later at https://account.live.com/consent/Manage (Microsoft keeps the "connected app" entry after you press DONE).
+
+Microsoft cannot revoke an access token early. After DONE the Relay forgets it at once, but it stays valid at Microsoft until it expires (60 to 90 minutes). It never reaches the shared computer.
 
 ---
 
@@ -103,6 +130,11 @@ If Spotify says the redirect/secret is invalid, re-check the exact URI. If the t
 | Phone shows "You did not grant the requested permission" | You unticked the Gmail permission on Google's screen; try again |
 | Gmail write button missing | You unlocked *Read only*. Lock and unlock with *Read & write* |
 | Spotify "not configured" | Phase 4 steps 3-4 and redeploy; check `/health` |
+| Outlook "not configured" | Phase 6 steps 3, 6 and 7; `MICROSOFT_TENANT` must be `consumers`, `common`, `organizations` or a tenant GUID; check `/health` |
+| Microsoft `AADSTS50011` / redirect mismatch | The Web redirect URI in Entra must equal `MICROSOFT_REDIRECT_URI` exactly |
+| Microsoft `AADSTS7000215` invalid client secret | You copied the Secret ID instead of the Value, or the secret expired. Create a new one and repeat step 6 |
+| Microsoft `AADSTS700016` / `AADSTS50020` | Wrong account type on the registration. It must be "Personal Microsoft accounts only" (or use `common` with a multi-account registration) |
+| Phone shows "You did not grant the requested permission" (Outlook) | A permission was unticked on Microsoft's screen; try again |
 | Spotify 403 | Account not in User Management, or app owner's Premium lapsed |
 | Spotify "No active device" | Open Spotify on the phone, play any song, press Refresh |
 | `wrangler deploy` complains about Durable Objects | You changed the class name or migration block; restore them as shipped |

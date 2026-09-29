@@ -12,12 +12,13 @@ const PLAYER_URL = ((import.meta.env.VITE_PLAYER_URL as string | undefined) || "
 interface Mode { id: string; label: string; access?: Access; open?: string }
 const MODES: Record<string, Mode[]> = {
   gmail: [{ id: "read", label: "Read only", access: "read" }, { id: "write", label: "Read & write", access: "write" }],
+  outlook: [{ id: "read", label: "Read only", access: "read" }, { id: "write", label: "Read & write", access: "write" }],
   spotify: [
     ...(PLAYER_URL ? [{ id: "player", label: "Web player (opens a new tab)", open: PLAYER_URL }] : []),
     { id: "remote", label: "Remote control (plays on your phone or speaker)", access: "write" as Access },
   ],
 };
-const choice: Record<string, string> = { gmail: "read", spotify: PLAYER_URL ? "player" : "remote" }; // least privilege by default
+const choice: Record<string, string> = { gmail: "read", outlook: "read", spotify: PLAYER_URL ? "player" : "remote" }; // least privilege by default
 
 export function launcher(root: HTMLElement) {
   const notice = takeNotice();

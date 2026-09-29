@@ -13,6 +13,12 @@ export interface Env {
   SPOTIFY_CLIENT_ID?: string;
   SPOTIFY_CLIENT_SECRET?: string;
   SPOTIFY_REDIRECT_URI?: string;
+  /** Outlook (v3) is optional: leave these empty and the Outlook tile reports "not configured". The secret is a Cloudflare secret. */
+  MICROSOFT_CLIENT_ID?: string;
+  MICROSOFT_CLIENT_SECRET?: string;
+  MICROSOFT_REDIRECT_URI?: string;
+  /** "consumers" (personal accounts, the default), "organizations", "common" or a tenant GUID. Anything else = not configured. */
+  MICROSOFT_TENANT?: string;
   /** Spotify web player (v2.1). A DIFFERENT origin than FRONTEND_ORIGIN, e.g. https://sakkol-player.github.io (no path). */
   PLAYER_ORIGIN?: string;
   /** Full URL of the player page, with trailing slash, e.g. https://sakkol-player.github.io/player/ */

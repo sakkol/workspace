@@ -24,7 +24,7 @@ Errors look like `{ "error": "code" }`.
 
 ## Session
 
-`POST /session/revoke` (Bearer capability): destroys the session and revokes the token at Google (Spotify has no revoke endpoint).
+`POST /session/revoke` (Bearer capability): destroys the session and revokes the token at Google (Spotify and Microsoft have no revoke endpoint for access tokens: the Relay just deletes its copy).
 
 ## Gmail (Bearer capability of app `gmail`)
 
@@ -37,6 +37,23 @@ Errors look like `{ "error": "code" }`.
 | `POST /gmail/(messages\|threads)/:id/action` `{action}` | write | `read` `unread` `star` `unstar` `archive`. On a thread it applies to every message in it |
 | `POST /gmail/(messages\|threads)/:id/trash` / `untrash` | write | No permanent delete exists |
 | `POST /gmail/send` `{to[],cc[],subject,body,replyToId?}` | write | Max 10 recipients, 150-char subject, 50 000-char body, **10 sends per session**. MIME is built by the Relay. No Bcc, attachments, forwarding. |
+
+## Outlook (Bearer capability of app `outlook`) — v3
+
+Microsoft Graph. Folder names are a whitelist of Graph well-known names: `inbox` `sentitems` `archive` `deleteditems` `junkemail`. Ids match `^[A-Za-z0-9_=-]{1,300}$`. Plain Inbox only (no Focused/Other). No search route. The Relay never calls `/me` (no name, address or id is requested).
+
+| Path | Access | Notes |
+|---|---|---|
+| `GET /outlook/profile` | read | `{unread,total,access,ttlMs}` from `/me/mailFolders/inbox` |
+| `GET /outlook/conversations?folder=&pageToken=` | read | Graph has no thread list: the Relay fetches 50 messages newest first and **groups by `conversationId`**. `count` = messages of that conversation on this page/folder. `pageToken` is our own opaque token (`t.<skiptoken>` or `s.<skip>`), never a URL. Returns `{threads:[{id,subject,senders[],count,date,snippet,unread,starred}], nextPageToken}` (`starred` = flagged) |
+| `GET /outlook/conversations/:id` | read | Whole conversation, oldest first (last 30): same message shape as Gmail plus `replyHint` (who Outlook will reply to). Bodies are plain text (HTML is reduced to text) |
+| `POST /outlook/conversations/:id/action` `{action, folder?}` | write | `read` (unread messages only) `unread` / `flag` (newest message) `unflag` (flagged ones) `archive` (messages currently in the inbox). ≤ 30 messages per call |
+| `POST /outlook/conversations/:id/trash` `{folder?}` / `untrash` | write | **Move** to `deleteditems` (from `folder`, default `inbox`) / back to `inbox`. Graph `DELETE` is never called |
+| `POST /outlook/messages/:id/action` `{action}` / `trash` / `untrash` | write | Same operations on one message |
+| `POST /outlook/send` `{to[],cc[],subject,body}` | write | Max 10 recipients, 150-char subject, 50 000-char body, **10 sends per session** (shared with replies), 3/min. Graph JSON built by the Relay (`Text`, `saveToSentItems:true`). No Bcc, attachments, forwarding |
+| `POST /outlook/messages/:id/reply` `{comment}` | write | Outlook chooses the recipients and quotes the original. Any other field in the body is ignored. Counts as a send |
+
+Errors: `session_expired` (401, also when Graph rejects the token: the session is removed), `outlook_forbidden` (403), `not_found`, `outlook_rate_limited` (429 + `Retry-After`), `outlook_unavailable` (502), `outlook_bad_request` (400), `bad_folder`, `bad_page`, `bad_id`, `bad_action`, `read_only` (403), `send_limit` (429).
 
 ## Spotify (Bearer capability of app `spotify`)
 
@@ -52,7 +69,7 @@ Error codes worth handling: `session_expired` (401), `read_only` (403), `send_li
 
 ## `GET /health`
 
-`{ok, configured:{tokenKey, google, spotify}}` (booleans only, no values). Use it to check your setup.
+`{ok, configured:{tokenKey, google, microsoft, spotify, player}}` (booleans only, no values). Use it to check your setup.
 
 
 ## Origins (v2.1)

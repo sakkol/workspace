@@ -75,7 +75,7 @@ const bearer = (cap: string) => ({ Authorization: "Bearer " + cap });
 describe("router", () => {
   it("/health reports booleans only", async () => {
     const r = await call("/health", { origin: null });
-    expect(await r.json()).toEqual({ ok: true, configured: { tokenKey: true, google: true, spotify: false, player: false } });
+    expect(await r.json()).toEqual({ ok: true, configured: { tokenKey: true, google: true, microsoft: false, spotify: false, player: false } });
   });
 
   it("rejects API calls from other origins, and sets CORS only for the frontend", async () => {
@@ -277,7 +277,7 @@ describe("spotify web player (isolated origin)", () => {
 
   it("hands the token over exactly once, keeps no session, and never keeps the refresh token", async () => {
     const u = await unlockStream();
-    expect(u.authUrl.searchParams.get("scope")).toBe("streaming user-read-email user-read-private user-read-playback-state user-modify-playback-state");
+    expect(u.authUrl.searchParams.get("scope")).toBe("streaming user-read-email user-read-private user-read-playback-state user-modify-playback-state user-library-read playlist-read-private playlist-read-collaborative");
     expect(u.authUrl.searchParams.has("include_granted_scopes")).toBe(false);
     // the phone is sent back to the PLAYER site, not the workspace
     expect(u.cb.headers.get("Location")).toBe(`${PLAYER}/player/#/p/${u.start.id}/done`);

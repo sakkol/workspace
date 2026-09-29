@@ -37,7 +37,7 @@ export async function unlockView(root: HTMLElement, app: AppId, access: Access) 
     h("h2", {}, `Unlock ${APP_NAMES[app]}`),
     canvas,
     h("div", { cls: "code", "aria-label": "verification code" }, tx.code),
-    h("p", {}, "1. Scan the QR code with your phone.", h("br"), "2. Type this code on your phone when asked.", h("br"), "3. Approve on Google's / Spotify's own page."),
+    h("p", {}, "1. Scan the QR code with your phone.", h("br"), "2. Type this code on your phone when asked.", h("br"), "3. Approve on Google's / Microsoft's / Spotify's own page."),
     h("p", { cls: "mut small" }, "Your password is never typed on this computer. Only continue if you started this yourself."),
     h("p", { cls: "mut" }, "Expires in ", left),
     h("div", { cls: "row" }, back)));
