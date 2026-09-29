@@ -1,40 +1,79 @@
-# Sakkol Workspace (v2)
+# Sakkol Workspace (v3)
 
-Unlock your apps on an **untrusted shared computer** using your **trusted phone**. Your Google/Microsoft/Spotify password is never typed on the shared computer, and no login credential is stored in the shared browser.
+A small personal workspace for **untrusted shared computers**. You unlock each app with your **trusted phone**; the shared browser never sees a password and never stores a login.
 
-| App | v2 status |
+| App | Access levels |
 |---|---|
-| Gmail | read-only **or** read & write (send, reply, star, archive, trash) |
-| Outlook (v3) | read-only **or** read & write (send, reply, flag, archive, move to Deleted Items); personal Microsoft accounts |
-| Spotify | remote control of your own devices **or** a web player in a separate browser tab (v2.1) |
-| Google Drive, Notion | "coming soon" tiles (no backend yet) |
+| Gmail | read-only, or read & write (send, reply, star, archive, trash) |
+| **Outlook / Hotmail (new in v3)** | read-only, or read & write (send, reply, flag, archive, delete = move to Deleted Items) |
+| Spotify | remote control of your own devices, or a web player in a separate tab |
+| Widgets | clock, countdown timer, quick links (all in memory) |
 
-**Start here:** [`SETUP-STEPS.md`](SETUP-STEPS.md) (deploy + Google/Spotify/Cloudflare/GitHub configuration, all phases). Spotify web player: [`SETUP-STEPS-v2.1.md`](SETUP-STEPS-v2.1.md).
-Next versions (for an AI agent): [`docs/NEXT-STEPS-FOR-AI-AGENT.md`](docs/NEXT-STEPS-FOR-AI-AGENT.md).
-Then: [`docs/SECURITY.md`](docs/SECURITY.md) · [`docs/API.md`](docs/API.md) · [`docs/SECURITY-REVIEW-v1.md`](docs/SECURITY-REVIEW-v1.md).
+Google Drive, Notion and Calendar are planned (see `docs/NEXT-STEPS-FOR-AI-AGENT.md`).
 
-## How it works
+## How unlocking works
 
-1. On the shared computer you tap **Unlock Gmail** (or Spotify). It shows a QR code and a 6-digit code.
-2. On your phone you scan the QR, see *what* is being unlocked and *where the request came from*, and **type** the 6-digit code.
-3. The phone goes to Google's / Microsoft's / Spotify's own consent page. The Relay (a Cloudflare Worker) receives the token. **The token never reaches the shared browser.**
-4. The shared browser claims a random, short-lived **capability** (held only in JavaScript memory, one per app) and uses it against the Relay.
-5. **DONE** (or a timer, or a page refresh) ends the session. The Relay enforces expiry itself.
-
-## Layout
+1. On the shared computer, tap **Unlock** on a tile. It shows a QR code and a 6-digit code.
+2. Scan the QR with your phone, **type the code**, then approve on Google's / Microsoft's / Spotify's own page.
+3. A small relay (Cloudflare Worker) receives the vendor token and keeps it encrypted. The browser gets only an opaque, short-lived **capability** held in JavaScript memory.
+4. **DONE**, a timer, or a page refresh ends the session.
 
 ```
-web/      static frontend (TypeScript + Vite)  -> GitHub Pages
-worker/   Cloudflare Worker "Relay" + Durable Object -> workers.dev
-docs/     API, security architecture, v1 review
-SETUP-STEPS.md
+Shared browser  ──capability──▶  Relay (Cloudflare Worker + Durable Object)  ──token──▶  Gmail / Microsoft Graph / Spotify
+     ▲                                          ▲
+     └── QR + typed code ── your phone ── OAuth consent (PKCE)
 ```
 
-Adding an app later (Drive, Notion): one entry in `worker/src/apps.ts`, a vendor in `worker/src/vendors.ts` if it is a new OAuth provider, a route file, and a tile in `web/src/apps/registry.ts`.
+## What v3 adds: Outlook
 
-## Commands
+- Personal Microsoft accounts (tenant `consumers`) via **Microsoft Graph**, plain OAuth (no MSAL).
+- Same interface as Gmail. The mail UI now lives in `web/src/apps/mail/` and Gmail and Outlook plug into it through a small adapter.
+- Plain Inbox plus Sent, Archive, Deleted Items and Junk; conversation view with folded quoted text.
+- Scopes: `Mail.Read` (read) or `Mail.ReadWrite` + `Mail.Send` (write). **Never** `offline_access`, so Microsoft issues no refresh token.
+- Replies are addressed by Outlook itself; the browser can only supply the text.
+- Never calls Graph `DELETE`, and never calls `/me` (no name or address is requested).
+
+## Security highlights
+
+- No cookies, `localStorage`, `IndexedDB` or service workers hold credentials in the shared browser.
+- Vendor tokens stay on the relay, AES-GCM encrypted; no refresh tokens are kept.
+- One capability per app; using it on another app's routes looks the same as an expired session.
+- Sessions: 30 min max and 5 min idle for mail, both capped by the token's own lifetime and enforced by the relay.
+- Write actions are capped: 10 sends per session, 3 per minute, no Bcc, attachments, forwarding or permanent delete.
+- Mail is rendered as plain text only; links are not clickable; the real sender address is always shown.
+- Every route uses allow-lists, strict ID patterns and length limits. Paging never follows a URL supplied by the browser.
+
+Details, residual risks and the manual checklist: [`docs/SECURITY.md`](docs/SECURITY.md).
+
+## Known limits
+
+- Microsoft has no revocation endpoint for access tokens. After DONE the relay forgets the token at once, but it stays valid at Microsoft until it expires (60–90 min). It never reaches the shared computer.
+- The Outlook app registration's **client secret expires** (max 24 months). Set a reminder and renew it.
+- Outlook has no search, and the message count in a list is per page (the conversation view shows the real count).
+- Not yet tested against a live Microsoft account beyond the automated tests: see the checklist in `docs/SECURITY.md`.
+
+## Repository layout
+
+| Path | Contents |
+|---|---|
+| `web/` | Static frontend (TypeScript, Vite, vanilla DOM), hosted on GitHub Pages |
+| `worker/` | Relay: Cloudflare Worker + one Durable Object (`Store`) |
+| `worker/src/core.ts` | Pure, unit-tested logic (link transactions, sessions, rate limits) |
+| `worker/src/outlook.ts` | Outlook routes (Graph) |
+| `web/src/apps/mail/` | Shared mail UI (list, conversation view, compose) |
+| `docs/` | `API.md`, `SECURITY.md`, roadmap and review notes |
+
+## Develop
 
 ```bash
-cd worker && npm ci && npm test && npm run typecheck   # unit + router tests
-cd web    && npm ci && npm test && npm run build       # needs VITE_RELAY_URL for the build
+cd worker && npm ci && npm test && npx tsc --noEmit
+cd ../web  && npm ci && npm test && npx tsc --noEmit && npx vite build
 ```
+
+The frontend build needs the repository variable `VITE_RELAY_URL` (public, no trailing slash).
+
+## Set up
+
+Follow [`SETUP-STEPS.md`](SETUP-STEPS.md). Outlook is **Phase 6** (an Entra app registration, one secret, three Graph permissions). Spotify web player: [`SETUP-STEPS-v2.1.md`](SETUP-STEPS-v2.1.md).
+
+When updating from a zip, delete everything except `.git` first so files removed in a new version don't linger.
