@@ -55,6 +55,11 @@ const MESSAGES: Record<string, string> = {
   outlook_unavailable: "Outlook is unavailable right now.", outlook_forbidden: "Microsoft refused this request (permission missing). Lock and unlock again.",
   outlook_rate_limited: "Outlook asked us to slow down. Try again shortly.", outlook_bad_request: "Outlook could not process this request.",
   bad_folder: "That folder is not available.",
+  tasks_unavailable: "Google Tasks is unavailable right now.", tasks_rate_limited: "Google Tasks asked us to slow down. Try again shortly.",
+  tasks_forbidden: "Google refused this request. Lock and unlock again; if it keeps happening, check that the Google Tasks API is enabled (SETUP-STEPS.md).",
+  tasks_bad_request: "Google Tasks could not process this request.", write_limit: "Change limit reached for this session (200). Lock and unlock to continue.",
+  bad_title: "Enter a title (up to 500 characters, one line).", bad_notes: "The notes are too long.", bad_due: "That date is not valid.", nothing_to_change: "Nothing to change.",
+
   premium_required: "Spotify needs a Premium account to control playback.",
   no_active_device: "No active Spotify device. Open Spotify on your phone or speaker, then press Refresh.",
   spotify_forbidden: "Spotify refused this request. Your account may not be on the app's allowed-users list.",

@@ -1,13 +1,16 @@
-# Sakkol Workspace (v3)
+# Sakkol Workspace (v3.1)
 
 A small personal workspace for **untrusted shared computers**. You unlock each app with your **trusted phone**; the shared browser never sees a password and never stores a login.
 
 | App | Access levels |
 |---|---|
 | Gmail | read-only, or read & write (send, reply, star, archive, trash) |
-| **Outlook / Hotmail (new in v3)** | read-only, or read & write (send, reply, flag, archive, delete = move to Deleted Items) |
+| **Google Tasks (new in v3.1)** | read-only, or read & write (add, edit, complete; no delete) |
+| Outlook / Hotmail | read-only, or read & write (send, reply, flag, archive, delete = move to Deleted Items) |
 | Spotify | remote control of your own devices, or a web player in a separate tab |
 | Widgets | clock, countdown timer, quick links (all in memory) |
+
+**One sign-in for several Google apps:** tick "Also unlock Google Tasks" on the Gmail tile (or the reverse). One QR scan, one Google consent screen, one capability per app.
 
 Google Drive, Notion and Calendar are planned (see `docs/NEXT-STEPS-FOR-AI-AGENT.md`).
 
@@ -24,7 +27,14 @@ Shared browser  ──capability──▶  Relay (Cloudflare Worker + Durable Ob
      └── QR + typed code ── your phone ── OAuth consent (PKCE)
 ```
 
-## What v3 adds: Outlook
+## What v3.1 adds: Google Tasks and the Google bundle
+
+- **Google Tasks:** lists, open/completed tasks, add, edit (title, notes, due date), complete/reopen. Google's `tasks` scope could also delete; the Relay has **no delete route** and never sends `DELETE`.
+- **Bundle (Google apps only):** one QR scan unlocks Gmail + Tasks, each with its own access level (e.g. Gmail read-only, Tasks read & write). Off by default. The phone lists every app being granted. If any permission is unticked on Google's screen, the whole unlock fails.
+- Each app still has its **own capability**; using one on the other's routes is refused. The shared Google token is revoked only when the **last** app of the bundle is locked or expires.
+- Tasks write limits: 60 changes/min and 200 per session.
+
+## What v3 added: Outlook
 
 - Personal Microsoft accounts (tenant `consumers`) via **Microsoft Graph**, plain OAuth (no MSAL).
 - Same interface as Gmail. The mail UI now lives in `web/src/apps/mail/` and Gmail and Outlook plug into it through a small adapter.
@@ -45,6 +55,8 @@ Shared browser  ──capability──▶  Relay (Cloudflare Worker + Durable Ob
 
 Details, residual risks and the manual checklist: [`docs/SECURITY.md`](docs/SECURITY.md).
 
+**Bundle note:** while Gmail and Tasks are unlocked together, one Google token carrying both scopes sits on the Relay (never in the browser). Per-capability route binding is the isolation boundary.
+
 ## Known limits
 
 - Microsoft has no revocation endpoint for access tokens. After DONE the relay forgets the token at once, but it stays valid at Microsoft until it expires (60–90 min). It never reaches the shared computer.
@@ -60,6 +72,7 @@ Details, residual risks and the manual checklist: [`docs/SECURITY.md`](docs/SECU
 | `worker/` | Relay: Cloudflare Worker + one Durable Object (`Store`) |
 | `worker/src/core.ts` | Pure, unit-tested logic (link transactions, sessions, rate limits) |
 | `worker/src/outlook.ts` | Outlook routes (Graph) |
+| `worker/src/tasks.ts` | Google Tasks routes |
 | `web/src/apps/mail/` | Shared mail UI (list, conversation view, compose) |
 | `docs/` | `API.md`, `SECURITY.md`, roadmap and review notes |
 
@@ -74,6 +87,6 @@ The frontend build needs the repository variable `VITE_RELAY_URL` (public, no tr
 
 ## Set up
 
-Follow [`SETUP-STEPS.md`](SETUP-STEPS.md). Outlook is **Phase 6** (an Entra app registration, one secret, three Graph permissions). Spotify web player: [`SETUP-STEPS-v2.1.md`](SETUP-STEPS-v2.1.md).
+Follow [`docs/SETUP-STEPS.md`](docs/SETUP-STEPS.md). Outlook is **Phase 6** (an Entra app registration, one secret, three Graph permissions). Google Tasks is **Phase 7** (enable one API, add two scopes; no new secret). Spotify web player: [`docs/SETUP-STEPS-v2.1.md`](docs/SETUP-STEPS-v2.1.md).
 
 When updating from a zip, delete everything except `.git` first so files removed in a new version don't linger.

@@ -22,7 +22,7 @@ function render() {
   root.replaceChildren(h("div", { cls: "head" }, h("h1", { cls: "brand" }, "Sakkol"), timerChip()), body);
   switch (view.n) {
     case "launcher": return launcher(body);
-    case "unlock": return void unlockView(body, view.app, view.access);
+    case "unlock": return void unlockView(body, view.app, view.access, view.also ?? []);
     case "phone": return void phoneView(body, view.id, view.sub);
     case "app":
       if (!caps.has(view.app)) return go({ n: "launcher" });

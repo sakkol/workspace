@@ -23,7 +23,7 @@ export class Store extends DurableObject<Env> {
     });
   }
 
-  newTx(app: unknown, access: unknown, claimHash: unknown, ctx: Partial<TxCtx>) { return this.core.newTx(app, access, claimHash, ctx); }
+  newTx(app: unknown, access: unknown, claimHash: unknown, ctx: Partial<TxCtx>, also?: unknown) { return this.core.newTx(app, access, claimHash, ctx, also); }
   status(id: string, secret: string) { return this.core.status(id, secret); }
   info(id: string) { return this.core.info(id); }
   confirm(id: string, code: unknown) { return this.core.confirm(id, code); }
@@ -37,6 +37,7 @@ export class Store extends DurableObject<Env> {
   auth(cap: string, app: AppId, touch = true) { return this.core.auth(cap, app, touch); }
   revoke(cap: string) { return this.core.revoke(cap); }
   sendSlot(cap: string, app: AppId = "gmail") { return this.core.sendSlot(cap, app); }
+  writeSlot(cap: string, app: AppId, max?: number) { return this.core.writeSlot(cap, app, max); }
   async hit(key: string, limit: number, windowMs: number) { return this.core.hit(key, limit, windowMs); }
   alarm() { return this.core.alarm(); }
 }

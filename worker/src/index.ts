@@ -1,12 +1,13 @@
 import type { Env } from "./env";
 import type { RouteCtx } from "./ctx";
-import { APPS, scopesFor, type VendorId } from "./apps";
+import { APPS, type VendorId } from "./apps";
 import { HttpErr, Bad } from "./errors";
 import { ipKey, uaLabel } from "./security";
 import { VENDORS, authUrlFor, configured, creds, exchange } from "./vendors";
 import { handleGmail } from "./gmail";
 import { handleSpotify } from "./spotify";
 import { handleOutlook } from "./outlook";
+import { handleTasks } from "./tasks";
 
 export { Store } from "./store";
 
@@ -95,7 +96,7 @@ export default {
         const app = typeof b.app === "string" && Object.hasOwn(APPS, b.app) ? (b.app as keyof typeof APPS) : null;
         if (app && !configured(env, APPS[app].vendor)) return J({ error: "app_not_configured" }, 503);
         const cf = (req as any).cf ?? {};
-        const r = await store.newTx(b.app, b.access, b.claimHash, { country: cf.country, city: cf.city, ua: uaLabel(req.headers.get("User-Agent") || "") });
+        const r = await store.newTx(b.app, b.access, b.claimHash, { country: cf.country, city: cf.city, ua: uaLabel(req.headers.get("User-Agent") || "") }, b.also);
         if ("error" in r) return J({ error: r.error }, r.error === "busy" ? 503 : 400);
         return J(r);
       }
@@ -134,7 +135,7 @@ export default {
         const cr = creds(env, vendor);
         const q = new URLSearchParams({
           client_id: cr.id, redirect_uri: cr.redirect, response_type: "code",
-          scope: scopesFor(b.app, b.access), state: b.state,
+          scope: b.scope, state: b.state,
           code_challenge: b.challenge, code_challenge_method: "S256", ...VENDORS[vendor].extra,
         });
         return redirect(authUrlFor(env, vendor) + "?" + q);
@@ -150,7 +151,7 @@ export default {
         const code = u.searchParams.get("code");
         if (u.searchParams.get("error") || !code) { await store.fail(s.id); return back("denied"); }
         let ex;
-        try { ex = await exchange(env, vendor, code, s.verifier, scopesFor(s.app, s.access)); }
+        try { ex = await exchange(env, vendor, code, s.verifier, s.scope); }
         catch { await store.fail(s.id); return back("failed"); }
         const r = await store.approve(s.id, ex);
         if (r === "scope") return back("scope");
@@ -168,6 +169,7 @@ export default {
         if (p.startsWith("/gmail/")) return await handleGmail(c);
         if (p.startsWith("/spotify/")) return await handleSpotify(c);
         if (p.startsWith("/outlook/")) return await handleOutlook(c);
+        if (p.startsWith("/tasks/")) return await handleTasks(c);
       } catch (e) {
         // The vendor rejected our token: the session is useless, remove it.
         if (e instanceof HttpErr && e.status === 401 && bearer) await store.revoke(bearer);

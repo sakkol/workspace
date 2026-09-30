@@ -1,6 +1,6 @@
 import { h, mmss, set } from "./core/dom";
 import { lockAll, lockApp } from "./core/api";
-import { caps, every, go, rerender, takeNotice, AppId, Access } from "./core/state";
+import { caps, every, go, rerender, takeNotice, APP_NAMES, AppId, Access } from "./core/state";
 import { TILES } from "./apps/registry";
 import { clockWidget } from "./widgets/clock";
 import { timerWidget } from "./widgets/timer";
@@ -13,12 +13,16 @@ interface Mode { id: string; label: string; access?: Access; open?: string }
 const MODES: Record<string, Mode[]> = {
   gmail: [{ id: "read", label: "Read only", access: "read" }, { id: "write", label: "Read & write", access: "write" }],
   outlook: [{ id: "read", label: "Read only", access: "read" }, { id: "write", label: "Read & write", access: "write" }],
+  tasks: [{ id: "read", label: "Read only", access: "read" }, { id: "write", label: "Read & write", access: "write" }],
   spotify: [
     ...(PLAYER_URL ? [{ id: "player", label: "Web player (opens a new tab)", open: PLAYER_URL }] : []),
     { id: "remote", label: "Remote control (plays on your phone or speaker)", access: "write" as Access },
   ],
 };
-const choice: Record<string, string> = { gmail: "read", outlook: "read", spotify: PLAYER_URL ? "player" : "remote" }; // least privilege by default
+// Google apps can be unlocked together with ONE sign-in. Off by default; the partner has its own access level (read-only by default).
+const PARTNER: Record<string, AppId> = { gmail: "tasks", tasks: "gmail" };
+const bundle: Record<string, { on: boolean; access: Access }> = { gmail: { on: false, access: "read" }, tasks: { on: false, access: "read" } };
+const choice: Record<string, string> = { gmail: "read", outlook: "read", tasks: "read", spotify: PLAYER_URL ? "player" : "remote" }; // least privilege by default
 
 export function launcher(root: HTMLElement) {
   const notice = takeNotice();
@@ -51,9 +55,22 @@ export function launcher(root: HTMLElement) {
       const m = modes.find((x) => x.id === choice[t.id]) ?? modes[0];
       if (!m) return;
       if (m.open) window.open(m.open, "_blank", "noopener,noreferrer"); // noopener: the new tab gets no handle on this page
-      else go({ n: "unlock", app: t.id as AppId, access: m.access! });
+      else {
+        const partner = PARTNER[t.id], b = bundle[t.id];
+        const also = partner && b?.on && !caps.has(partner) ? [{ app: partner, access: b.access }] : undefined;
+        go({ n: "unlock", app: t.id as AppId, access: m.access!, also });
+      }
     };
-    return h("div", { cls: "tile" }, ...kids, h("div", { cls: "small" }, "🔒 Locked"), radios,
+    const partner = PARTNER[t.id];
+    const pb = partner ? bundle[t.id] : undefined;
+    const together = partner && pb && !caps.has(partner)
+      ? h("div", { cls: "choices" },
+          h("label", {}, h("input", { type: "checkbox", checked: pb.on, onchange: (e: Event) => { pb.on = (e.target as HTMLInputElement).checked; rerender(); } }), ` Also unlock ${APP_NAMES[partner]} (same sign-in)`),
+          pb.on ? h("div", { cls: "sub-choices" }, ...(["read", "write"] as Access[]).map((a) => h("label", {},
+            h("input", { type: "radio", name: "also-" + t.id, checked: pb.access === a, onchange: () => { pb.access = a; } }),
+            ` ${APP_NAMES[partner]}: ${a === "read" ? "read only" : "read & write"}`))) : null)
+      : null;
+    return h("div", { cls: "tile" }, ...kids, h("div", { cls: "small" }, "🔒 Locked"), radios, together,
       h("div", { cls: "row-l" }, h("button", { cls: "pri", onclick: unlock }, "Unlock")));
   });
 

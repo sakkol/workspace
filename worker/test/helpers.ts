@@ -1,6 +1,6 @@
 import { KV, Hooks, StoreCore } from "../src/core";
 import { b64u, sha } from "../src/security";
-import { scopesFor, type AppId, type Access } from "../src/apps";
+import { bundleScopes, makeBundle, type AppId, type Access, type BundleItem } from "../src/apps";
 
 export class FakeKV implements KV {
   m = new Map<string, unknown>();
@@ -40,13 +40,13 @@ export const newSecret = async () => {
 };
 
 /** Drive a transaction all the way to `approved`. */
-export async function approvedTx(s: ReturnType<typeof setup>, app: AppId = "gmail", access: Access = "read", scope?: string) {
+export async function approvedTx(s: ReturnType<typeof setup>, app: AppId = "gmail", access: Access = "read", scope?: string, also?: BundleItem[]) {
   const { secret, hash } = await newSecret();
-  const tx: any = await s.core.newTx(app, access, hash, CTX);
+  const tx: any = await s.core.newTx(app, access, hash, CTX, also);
   const conf: any = await s.core.confirm(tx.id, tx.code);
   const b: any = await s.core.begin(tx.id, conf.nonce);
   const st: any = await s.core.takeState(b.state);
-  const granted = scope ?? scopesFor(app, access); // by default the vendor grants exactly what was requested
+  const granted = scope ?? bundleScopes(makeBundle({ app, access }, also) ?? [{ app, access }]); // by default the vendor grants exactly what was requested
   const res = await s.core.approve(st.id, { token: "TOKEN-" + app, tokenLifeMs: 3_600_000, scope: granted });
   return { tx, secret, res, id: tx.id as string };
 }

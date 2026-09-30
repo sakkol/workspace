@@ -132,3 +132,31 @@ Microsoft is a **new vendor** (`microsoft`), unlocked with its own QR scan. It i
 - [ ] Reply goes to the address shown as "Outlook sends this reply to"
 - [ ] Outlook DONE, then the old capability returns 401 (`session_expired`)
 - [ ] Outlook capability cannot open Gmail/Spotify routes and vice versa (covered by automated tests; spot check in the Network tab)
+
+
+---
+
+# v3.1 addendum: Google Tasks and the Google bundle
+
+## The bundle (one sign-in for Gmail + Tasks)
+- **Google only.** `makeBundle()` refuses any app whose vendor is not `google`, duplicates, `stream`, unknown apps and more than 3 apps. Outlook and Spotify always unlock on their own (R7). The launcher checkbox is **off by default**, and the partner app has its own access level (read-only by default).
+- **Scopes:** exactly the union of the chosen apps' scopes (for example `gmail.readonly` + `tasks`). Never `include_granted_scopes`, never offline access. The phone lists **every app and its access level** before approval.
+- **All or nothing:** the callback requires every scope of every app. If any is missing (for example Tasks unticked), the whole unlock fails, the token is revoked at Google and nothing is claimable.
+- **One session per app.** Claim returns one capability per app; each is bound to exactly one app (a Tasks capability on a Gmail route is `401`, and the reverse). Timers, idle limits and write counters are per session. Each session holds its own AES-GCM sealed copy of the token (own AAD) and a shared random *group id*.
+- **Shared token, group-aware revocation:** locking or expiring one app does **not** revoke the Google token while another session of the group is alive. The token is revoked when the last live session ends (Lock, idle, hard expiry, cleanup alarm), exactly once (tests cover both orders, one app expiring while the other continues, and simultaneous expiry).
+- **What the bundle changes:** while both apps are unlocked, one Google access token carries both scopes on the Relay. **Per-capability route binding on the Relay is the isolation boundary.** The token itself never reaches the browser. If a Google call is rejected (401), only the session that made it is removed.
+
+## Google Tasks
+- Scopes: read = `tasks.readonly`; write = `tasks`. The `tasks` scope would technically allow deleting tasks and lists; the Relay exposes neither (R14: reversible operations only), no `DELETE` method is representable in its Google client, and a test asserts none is ever sent.
+- Everything is Relay-built from whitelisted fields (title, notes, due, status). IDs and paging tokens are regex-checked; the browser never supplies a URL or query.
+- Titles and notes are untrusted text (plain text nodes, links not clickable).
+- Limits: 60 writes/min and **200 changes per session**, counted in the Durable Object after validation.
+- Completed tasks are only fetched on request (`showHidden=true` is required by Google to see tasks completed in its own apps).
+
+## Manual checklist additions (v3.1)
+- [ ] Unlock Gmail alone: the consent screen lists only Gmail. Unlock Tasks alone: only Tasks.
+- [ ] Unlock with "Also unlock Google Tasks": the phone lists both apps with their access levels; Google's screen lists both permissions
+- [ ] Untick one permission on Google's screen: the unlock fails ("did not grant") and nothing appears on the computer
+- [ ] Lock Gmail: Tasks keeps working. Lock Tasks afterwards: both gone. Then check https://myaccount.google.com/permissions still lists the app (Google keeps the entry) but the old token is dead
+- [ ] Read-only Tasks session shows no Add/Edit/checkbox controls
+- [ ] Completing a task in Sakkol shows it as completed in the Google Tasks app

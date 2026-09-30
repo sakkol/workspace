@@ -118,6 +118,23 @@ Microsoft cannot revoke an access token early. After DONE the Relay forgets it a
 
 ---
 
+## Phase 7: Google Tasks (v3.1, optional; no new secrets)
+
+Tasks uses the **same Google OAuth client** as Gmail. Nothing changes in `wrangler.toml` and there is no new secret. Two small things in Google Cloud (https://console.cloud.google.com, your existing project):
+
+1. **APIs & Services > Library > "Google Tasks API" > Enable.** (Without this, Tasks shows "Google refused this request".)
+2. **Google Auth Platform > Data Access > Add or remove scopes**: add
+   - `https://www.googleapis.com/auth/tasks.readonly` (see your tasks)
+   - `https://www.googleapis.com/auth/tasks` (add, edit, complete)
+   
+   Save. Your account stays under **Audience > Test users**. Tasks scopes are *sensitive*, not restricted, so Testing mode is fine.
+3. Deploy the Worker (`cd worker && npx wrangler deploy`) and push the site.
+4. On the site: the **Google Tasks** tile, or tick **"Also unlock Google Tasks (same sign-in)"** on the Gmail tile (or the reverse). The phone lists every app being granted. Google's consent screen shows the Gmail and Tasks permissions together; keep them all ticked, or the unlock is refused.
+
+Existing Gmail sessions are not affected. You do not need to re-consent Gmail unless you unlock with the checkbox.
+
+---
+
 ## Quick troubleshooting
 
 | Symptom | Fix |
@@ -126,6 +143,8 @@ Microsoft cannot revoke an access token early. After DONE the Relay forgets it a
 | Site loads but every action fails / CORS error | `FRONTEND_ORIGIN` must equal the page origin exactly (`https://sakkol.github.io`, no path, no trailing slash) |
 | Build fails "Set the repository variable VITE_RELAY_URL" | Add the variable in step Phase 2.1 |
 | Google `redirect_uri_mismatch` | The URI in Google Cloud must equal `GOOGLE_REDIRECT_URI` exactly |
+| Tasks: "Google refused this request" | Phase 7 step 1 (enable **Google Tasks API**) and step 2 (both Tasks scopes under Data Access); then lock and unlock again |
+| Bundle unlock says "did not grant the requested permission" | One of the permissions on Google's screen was unticked. The whole unlock is refused by design; try again with all ticked |
 | Google "access blocked" | Your account is not in **Test users** |
 | Phone shows "You did not grant the requested permission" | You unticked the Gmail permission on Google's screen; try again |
 | Gmail write button missing | You unlocked *Read only*. Lock and unlock with *Read & write* |

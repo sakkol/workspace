@@ -1,6 +1,6 @@
 // In-memory application state. NOTHING here is ever written to cookies, localStorage, sessionStorage or IndexedDB.
 
-export type AppId = "gmail" | "spotify" | "outlook";
+export type AppId = "gmail" | "spotify" | "outlook" | "tasks";
 export type Access = "read" | "write";
 export interface Cap { cap: string; expAt: number; access: Access }
 
@@ -9,7 +9,7 @@ export const caps = new Map<AppId, Cap>();
 
 export type View =
   | { n: "launcher" }
-  | { n: "unlock"; app: AppId; access: Access }
+  | { n: "unlock"; app: AppId; access: Access; also?: Array<{ app: AppId; access: Access }> } // `also` = Google bundle: one sign-in, several apps
   | { n: "app"; app: AppId }
   | { n: "phone"; id: string; sub: string };
 
@@ -37,7 +37,7 @@ let notice = "";
 export const setNotice = (s: string) => { notice = s; };
 export const takeNotice = () => { const n = notice; notice = ""; return n; };
 
-export const APP_NAMES: Record<AppId, string> = { gmail: "Gmail", spotify: "Spotify", outlook: "Outlook" };
+export const APP_NAMES: Record<AppId, string> = { gmail: "Gmail", spotify: "Spotify", outlook: "Outlook", tasks: "Google Tasks" };
 
 /** Forget an app's capability and data locally. */
 export function dropApp(app: AppId, why?: string) {

@@ -1,13 +1,14 @@
 // All single-use / expiry / limit logic lives here, with NO Cloudflare imports, so it can be unit-tested in Node.
 // The Durable Object (store.ts) is a thin wrapper: one DO instance = atomic, single-threaded state.
 
-import { APPS, AppId, Access, VendorId, isAccess, isApp, scopesFor, scopesGranted } from "./apps";
+import { APPS, AppId, Access, BundleItem, VendorId, bundleScopes, isAccess, isApp, makeBundle, scopesFor, scopesGranted } from "./apps";
 import { rnd, sha, timingSafeEqual } from "./security";
 
 export const TX_TTL = 150_000; // link transaction lifetime: 2.5 min
 export const MAX_PENDING = 100; // cap on simultaneous transactions
 export const CODE_TRIES = 3; // wrong-code attempts before a transaction is cancelled
 export const MAX_SENDS = 10; // messages (Gmail or Outlook) per session
+export const MAX_TASK_WRITES = 200; // Google Tasks changes per session
 
 export interface KV {
   get<T = unknown>(k: string): Promise<T | undefined>;
@@ -28,7 +29,8 @@ export interface Hooks {
 export type Status = "pending" | "confirmed" | "authorizing" | "exchanging" | "approved" | "consumed" | "cancelled";
 export interface TxCtx { country: string; city: string; ua: string }
 interface Tx {
-  app: AppId; access: Access;
+  app: AppId; access: Access; // the primary app; `bundle` (Google only) lists every app being unlocked, incl. this one
+  bundle?: BundleItem[];
   claimHash: string; code: string; attempts: number; ctx: TxCtx;
   state: string; verifier: string; challenge: string;
   status: Status; nonce?: string;
@@ -39,7 +41,14 @@ interface Sess {
   v: 2; app: AppId; access: Access;
   token: string; // sealed
   scope: string; created: number; last: number; hardExp: number; sends: number;
+  /** Google Tasks changes so far (absent on sessions created before v3.1). */
+  writes?: number;
+  /** Sessions of one bundle share ONE vendor token. The token is revoked at the vendor only when the last live session of the group ends. */
+  group?: string;
+  revoked?: boolean; // the shared token was already revoked by a sibling
 }
+/** Every app of a transaction (a single app for normal unlocks and for records made before bundles existed). */
+const appsOf = (t: { app: AppId; access: Access; bundle?: BundleItem[] }): BundleItem[] => t.bundle ?? [{ app: t.app, access: t.access }];
 
 const clip = (s: unknown, n: number) => String(s ?? "").replace(/[\r\n\0]/g, " ").slice(0, n);
 
@@ -61,14 +70,16 @@ export class StoreCore {
   }
 
   // ---------------- link transactions ----------------
-  async newTx(app: unknown, access: unknown, claimHash: unknown, ctx: Partial<TxCtx>) {
+  async newTx(app: unknown, access: unknown, claimHash: unknown, ctx: Partial<TxCtx>, also?: unknown) {
     if (!isApp(app) || !isAccess(access) || !scopesFor(app, access)) return { error: "bad_request" as const };
+    const bundle = makeBundle({ app, access }, also);
+    if (!bundle) return { error: "bad_request" as const };
     if (typeof claimHash !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(claimHash)) return { error: "bad_request" as const };
     if ((await this.kv.list({ prefix: "t:" })).size >= MAX_PENDING) return { error: "busy" as const };
     const id = rnd(16), verifier = rnd(32), now = this.now();
     const code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1_000_000).padStart(6, "0");
     const t: Tx = {
-      app, access, claimHash, code, attempts: 0,
+      app, access, ...(bundle.length > 1 ? { bundle } : {}), claimHash, code, attempts: 0,
       ctx: { country: clip(ctx.country, 4), city: clip(ctx.city, 60), ua: clip(ctx.ua, 60) },
       state: id + "." + rnd(16), verifier, challenge: await sha(verifier),
       status: "pending", created: now, exp: now + TX_TTL,
@@ -88,10 +99,12 @@ export class StoreCore {
   async info(id: string) {
     const t = await this.tx(id);
     if (!t || t.status !== "pending") return null;
-    const a = APPS[t.app];
+    const a = APPS[t.app], list = appsOf(t);
     return {
-      app: t.app, access: t.access, vendor: a.vendor as VendorId, label: t.access === "stream" ? a.label + " web player" : a.label,
-      describe: a.describe[t.access] ?? "", ctx: t.ctx,
+      app: t.app, access: t.access, vendor: a.vendor as VendorId, label: t.access === "stream" ? a.label + " web player" : list.map((i) => APPS[i.app].label).join(" + "),
+      // the phone lists EVERY app and access level being granted
+      apps: list.map((i) => ({ app: i.app, label: APPS[i.app].label, access: i.access, describe: APPS[i.app].describe[i.access] ?? "" })),
+      describe: list.length > 1 ? "One Google sign-in unlocks all of the following:" : a.describe[t.access] ?? "", ctx: t.ctx,
       ageSec: Math.floor((this.now() - t.created) / 1000), ttlMs: t.exp - this.now(),
     };
   }
@@ -116,7 +129,7 @@ export class StoreCore {
     const t = await this.tx(id);
     if (!t || t.status !== "confirmed" || !t.nonce || !timingSafeEqual(t.nonce, nonce)) return null;
     t.status = "authorizing"; delete t.nonce; await this.save(id, t);
-    return { state: t.state, challenge: t.challenge, app: t.app, access: t.access, vendor: APPS[t.app].vendor as VendorId };
+    return { state: t.state, challenge: t.challenge, app: t.app, access: t.access, vendor: APPS[t.app].vendor as VendorId, scope: bundleScopes(appsOf(t)) };
   }
 
   async takeState(state: string) {
@@ -125,14 +138,15 @@ export class StoreCore {
     const t = await this.tx(id);
     if (!t || t.status !== "authorizing" || !timingSafeEqual(t.state, state)) return null;
     t.status = "exchanging"; await this.save(id, t);
-    return { id, verifier: t.verifier, app: t.app, access: t.access, vendor: APPS[t.app].vendor as VendorId };
+    return { id, verifier: t.verifier, app: t.app, access: t.access, vendor: APPS[t.app].vendor as VendorId, scope: bundleScopes(appsOf(t)) };
   }
 
   /** Callback succeeded. Verifies that the vendor granted every scope we asked for (users can untick scopes). */
   async approve(id: string, r: { token: string; tokenLifeMs: number; scope: string }): Promise<"ok" | "scope" | "state"> {
     const t = await this.tx(id);
     if (!t || t.status !== "exchanging") return "state";
-    if (!scopesGranted(APPS[t.app].vendor, scopesFor(t.app, t.access), r.scope)) {
+    // Bundle: EVERY scope of EVERY app must be granted, otherwise the whole transaction fails (no partial unlock).
+    if (!scopesGranted(APPS[t.app].vendor, bundleScopes(appsOf(t)), r.scope)) {
       t.status = "cancelled"; await this.save(id, t);
       this.hooks.revoke(t.app, r.token); // do not keep a token that does less than requested
       return "scope";
@@ -161,16 +175,22 @@ export class StoreCore {
     const t = await this.tx(id);
     if (!t || t.access === "stream" || t.status !== "approved" || !t.token || !(await this.secretOk(t, secret))) return null;
     const plain = await this.hooks.open(t.token, "t:" + id);
-    const cap = rnd(32), now = this.now(), k = "s:" + (await sha(cap));
-    const life = Math.max(30_000, Math.min(APPS[t.app].maxLifeMs, (t.tokenLifeMs ?? 3_600_000) - 60_000));
-    const s: Sess = {
-      v: 2, app: t.app, access: t.access, token: await this.hooks.seal(plain, k),
-      scope: t.scope ?? "", created: now, last: now, hardExp: now + life, sends: 0,
-    };
-    await this.kv.put(k, s);
+    const now = this.now(), list = appsOf(t), group = list.length > 1 ? rnd(16) : undefined;
+    const caps: Record<string, { cap: string; ttlMs: number; access: Access }> = {};
+    for (const it of list) { // one session record per app: own capability, timers and limits (R4)
+      const cap = rnd(32), k = "s:" + (await sha(cap));
+      const life = Math.max(30_000, Math.min(APPS[it.app].maxLifeMs, (t.tokenLifeMs ?? 3_600_000) - 60_000));
+      const s: Sess = {
+        v: 2, app: it.app, access: it.access, token: await this.hooks.seal(plain, k), // a sealed copy per session
+        scope: t.scope ?? "", created: now, last: now, hardExp: now + life, sends: 0, writes: 0, ...(group ? { group } : {}),
+      };
+      await this.kv.put(k, s);
+      caps[it.app] = { cap, ttlMs: life, access: it.access };
+    }
     t.status = "consumed"; delete t.token; await this.save(id, t);
     await this.sched();
-    return { cap, ttlMs: life, app: t.app, access: t.access };
+    const first = caps[t.app];
+    return { cap: first.cap, ttlMs: first.ttlMs, app: t.app, access: t.access, caps }; // top-level fields = the primary app (older clients)
   }
 
   /**
@@ -207,8 +227,17 @@ export class StoreCore {
   }
 
   private async dispose(k: string, s: Sess) {
+    const cur = (await this.kv.get<Sess>(k)) ?? s; // re-read: `s` may be a stale snapshot (cleanup alarm), and a sibling may have revoked meanwhile
     await this.kv.delete(k);
-    if (s.v !== 2) return;
+    if (cur.v !== 2 || cur.revoked) return; // a sibling already revoked the shared token
+    if (s.group) {
+      // Bundle: the token is shared, so revoke it only when no other session of the group is still alive.
+      const sibs: Array<[string, Sess]> = [];
+      for (const [sk, v] of await this.kv.list<Sess>({ prefix: "s:" })) if (sk !== k && v.group === s.group) sibs.push([sk, v]);
+      const now = this.now();
+      if (sibs.some(([, v]) => !v.revoked && !this.expired(v, now))) return;
+      for (const [sk, v] of sibs) { v.revoked = true; await this.kv.put(sk, v); } // expired siblings must not revoke it a second time
+    }
     try { this.hooks.revoke(s.app, await this.hooks.open(s.token, k)); } catch { /* best effort */ }
   }
 
@@ -221,6 +250,17 @@ export class StoreCore {
     if (s.sends >= MAX_SENDS) return { ok: false as const, reason: "send_limit" as const };
     s.sends += 1; s.last = now; await this.kv.put(k, s);
     return { ok: true as const, left: MAX_SENDS - s.sends };
+  }
+
+  /** Reserve one Google Tasks change of the session (write sessions only, capability must belong to `app`). */
+  async writeSlot(cap: string, app: AppId, max = MAX_TASK_WRITES) {
+    const k = "s:" + (await sha(cap));
+    const s = await this.kv.get<Sess>(k);
+    const now = this.now();
+    if (!s || s.v !== 2 || s.app !== app || s.access !== "write" || this.expired(s, now)) return { ok: false as const, reason: "session_expired" as const };
+    if ((s.writes ?? 0) >= max) return { ok: false as const, reason: "write_limit" as const };
+    s.writes = (s.writes ?? 0) + 1; s.last = now; await this.kv.put(k, s);
+    return { ok: true as const, left: max - s.writes };
   }
 
   // ---------------- rate limiting (in memory) ----------------

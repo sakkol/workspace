@@ -48,6 +48,10 @@ export async function phoneView(root: HTMLElement, id: string, sub: string) {
   root.replaceChildren(
     h("h2", {}, `Unlock ${info.label} on a computer?`),
     h("p", {}, info.describe),
+    // A bundle lists EVERY app and the access level being granted.
+    Array.isArray(info.apps) && info.apps.length > 1
+      ? h("ul", { cls: "grants" }, ...info.apps.map((a: any) => h("li", {}, h("strong", {}, String(a.label)), " · ", h("span", { cls: "badge" }, a.access === "write" ? "read & write" : "read only"), h("div", { cls: "mut small" }, String(a.describe)))))
+      : "",
     h("div", { cls: "ctx" }, h("div", {}, h("strong", {}, "Request from: "), info.ctx.ua || "unknown browser"), h("div", {}, h("strong", {}, "Near: "), where), h("div", { cls: "mut" }, `Started ${info.ageSec} s ago`)),
     h("p", { cls: "warn" }, "⚠ Only continue if you are sitting at this computer right now. If someone sent you this link, cancel."),
     h("label", {}, "Type the 6-digit code shown on the computer:"), input, msg,

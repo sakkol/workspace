@@ -218,6 +218,7 @@ Guard-rails for future work touching this: keep the tests in `worker/test/core.t
 **Goal:** browse, search and preview files. Google vendor. Optionally joins the **Google bundle mechanism** (below) if the owner wants one QR scan for Gmail + Drive; ask.
 
 #### Optional: Google bundle mechanism (one scan for several Google apps; reused by v6)
+**Status: BUILT in v3.1** (Gmail + Google Tasks; see docs/SECURITY.md v3.1 addendum). Drive and Calendar only need an `AppDef`, a route file and a tile: `makeBundle()` already accepts any Google app, up to 3 per bundle.
 Only for apps of the **same vendor** (Google). Never bundle across vendors (Outlook, Spotify and Notion always unlock separately).
 - A transaction may carry `apps: AppId[]`, each with its own access level. Scopes sent to Google = the union of those apps' scopes. Launcher: checkboxes "Also unlock Drive / Calendar" (default off unless the owner says otherwise). The phone screen lists **every app and access level** being granted.
 - Callback: verify **all** union scopes were granted (R8); if not, fail the whole transaction (simplest safe option; document it).

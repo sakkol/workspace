@@ -8,9 +8,9 @@ Errors look like `{ "error": "code" }`.
 
 | Method & path | Caller | Notes |
 |---|---|---|
-| `POST /link/start` `{app, access, claimHash}` | shared computer | `app` ∈ `gmail`,`spotify`; `access` ∈ `read`,`write` (Spotify: `write` = remote control) or `stream` (Spotify web player: only from `PLAYER_ORIGIN`; everything else only from `FRONTEND_ORIGIN`, else 403 `wrong_origin`; 503 `player_not_configured` / `player_not_isolated`); `claimHash` = base64url SHA-256 of a 32-byte secret only the browser knows. Returns `{id, code, ttlMs}`. 503 `app_not_configured` if the vendor secrets are not set. |
+| `POST /link/start` `{app, access, claimHash, also?}` | shared computer | `app` ∈ `gmail`,`tasks`,`outlook`,`spotify`; **`also`** (optional, Google apps only) = `[{app, access}]`, e.g. `[{"app":"tasks","access":"read"}]`: one Google sign-in unlocks several apps, each with its own access level. Max 3 apps, no duplicates, `stream` not allowed, Outlook/Spotify never; otherwise 400 `bad_request`; `access` ∈ `read`,`write` (Spotify: `write` = remote control) or `stream` (Spotify web player: only from `PLAYER_ORIGIN`; everything else only from `FRONTEND_ORIGIN`, else 403 `wrong_origin`; 503 `player_not_configured` / `player_not_isolated`); `claimHash` = base64url SHA-256 of a 32-byte secret only the browser knows. Returns `{id, code, ttlMs}`. 503 `app_not_configured` if the vendor secrets are not set. |
 | `GET /link/status/:id` header `X-Claim-Secret` | shared computer | `{status}`: `pending` `approved` `expired` `consumed` `cancelled`. Wrong/missing secret looks like `expired`. |
-| `POST /link/claim/:id` header `X-Claim-Secret` | shared computer | One time. From the workspace: `{cap, ttlMs, app, access}`. From the player origin (stream only): `{token, ttlMs, app, access}`: the Spotify token is returned once and the Relay keeps nothing. 409 otherwise. |
+| `POST /link/claim/:id` header `X-Claim-Secret` | shared computer | One time. From the workspace: `{caps:{<app>:{cap,ttlMs,access}}, cap, ttlMs, app, access}` (`caps` has one entry per app; the top-level fields are the primary app). From the player origin (stream only): `{token, ttlMs, app, access}`: the Spotify token is returned once and the Relay keeps nothing. 409 otherwise. |
 | `GET /link/info/:id` | phone | `{app, access, vendor, label, describe, ctx{ua,city,country}, ageSec, ttlMs}`. **Never includes the code.** |
 | `POST /link/confirm/:id` `{code}` | phone | Code typed by the user. 403 `wrong_code` (`left` attempts), 410 `locked` after 3 wrong tries. Returns `{nonce}`. |
 | `POST /link/cancel/:id` (optional `X-Claim-Secret`) | either | |
@@ -37,6 +37,19 @@ Errors look like `{ "error": "code" }`.
 | `POST /gmail/(messages\|threads)/:id/action` `{action}` | write | `read` `unread` `star` `unstar` `archive`. On a thread it applies to every message in it |
 | `POST /gmail/(messages\|threads)/:id/trash` / `untrash` | write | No permanent delete exists |
 | `POST /gmail/send` `{to[],cc[],subject,body,replyToId?}` | write | Max 10 recipients, 150-char subject, 50 000-char body, **10 sends per session**. MIME is built by the Relay. No Bcc, attachments, forwarding. |
+
+## Google Tasks (Bearer capability of app `tasks`) — v3.1
+
+Ids match `^[A-Za-z0-9_-]{1,200}$`; `@default` and paths are refused. Field limits: title 1–500 chars (one line), notes ≤ 8000, due = `YYYY-MM-DD` (Tasks stores the date only). **There is no delete route** and the Relay never calls `DELETE`.
+
+| Path | Access | Notes |
+|---|---|---|
+| `GET /tasks/lists` | read | `{lists:[{id,title}]}` (up to 100) |
+| `GET /tasks/lists/:lid/tasks?completed=1&pageToken=` | read | 100 per page. Default = open tasks; `completed=1` also returns completed ones (sent to Google with `showHidden=true`, needed for tasks completed in Google's own apps). `{tasks:[{id,title,notes,status,due,parent,updated}], nextPageToken}`. Links and every other Google field are dropped |
+| `POST /tasks/lists/:lid/tasks` `{title, notes?, due?}` | write | Creates a task. Any other field (parent, id, status…) is ignored or refused |
+| `POST /tasks/lists/:lid/tasks/:tid/update` `{title?, notes?, due?, status?}` | write | `status` ∈ `needsAction`,`completed`. `due: null` clears the date. At least one field |
+
+Limits: 60 writes/min, **200 changes per session** (`write_limit`, counted only after validation). Errors: `session_expired`, `tasks_forbidden` (also when the Tasks API is not enabled), `tasks_rate_limited`, `tasks_unavailable`, `tasks_bad_request`, `bad_id`, `bad_page`, `bad_title`, `bad_notes`, `bad_due`, `bad_status`, `nothing_to_change`, `read_only`.
 
 ## Outlook (Bearer capability of app `outlook`) — v3
 
