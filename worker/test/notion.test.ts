@@ -9,10 +9,11 @@ import { FakeKV, setup, approvedTx } from "./helpers";
 import { b64u, sha } from "../src/security";
 import { APPS, hasAccess, makeBundle } from "../src/apps";
 import { VENDORS, NOTION_VERSION, configured, creds } from "../src/vendors";
-import { blockOut, pageTitle, propSummary, richText, toParagraphs, LIMITS, MAX_NOTION_WRITES } from "../src/notion";
+import { blockOut, pageTitle, propSummary, richText, toParagraphs, schemaOut, propertyValue, buildProperties, rowValues, validDate, LIMITS, MAX_NOTION_WRITES } from "../src/notion";
 
 const ORIGIN = "https://front.example", RELAY = "https://relay.example";
 const TOKEN = "ntn_SECRET-NOTION-ACCESS-TOKEN", REFRESH = "nrt_SECRET-NOTION-REFRESH-TOKEN", OWNER_MAIL = "owner.person@example.com";
+const DB1 = "dbdbdbdb-1111-4222-8333-444455556666", DS1 = "d5d5d5d5-1111-4222-8333-444455556666", ROW1 = "b0b0b0b0-1111-4222-8333-444455556666";
 const P1 = "59b8df07-1111-4222-8333-444455556666", P2 = "255104cd-aaaa-4bbb-8ccc-ddddeeeeffff", B1 = "a1c2d3e4-0000-4000-8000-000000000001", CUR = "0f0f0f0f-1111-4222-8333-444455556666";
 
 // ---------------------------------------------------------------- core / registry
@@ -43,7 +44,7 @@ describe("noScopes app (Notion)", () => {
     await s.core.revoke(c.cap);
     expect(s.revoked).toEqual([{ app: "notion", token: "TOKEN-notion", access: "write" }]);
   });
-  it("write allowance: 20 creates/appends per session, write sessions only", async () => {
+  it("write allowance: MAX_NOTION_WRITES creates/appends/row edits per session, write sessions only", async () => {
     const s = setup();
     const w: any = await s.core.claim(...(await (async () => { const a = await approvedTx(s, "notion", "write", ""); return [a.id, a.secret] as const; })()));
     for (let i = 0; i < MAX_NOTION_WRITES; i++) expect((await s.core.writeSlot(w.cap, "notion", MAX_NOTION_WRITES)).ok).toBe(true);
@@ -135,6 +136,15 @@ const SEARCH = { results: [
   { object: "data_source", id: B1, title: [] },
   { object: "page", id: "not-a-uuid", in_trash: false, properties: {} },
 ], has_more: true, next_cursor: CUR };
+const SCHEMA = { object: "data_source", id: DS1, title: [{ plain_text: "Tasks DB" }], properties: {
+  Name: { id: "title", name: "Name", type: "title", title: {} }, Status: { id: "s%5E", name: "Status", type: "status", status: { options: [{ name: "Todo" }, { name: "Doing" }, { name: "Done" }] } },
+  Tags: { id: "t1", name: "Tags", type: "multi_select", multi_select: { options: [{ name: "a" }, { name: "b" }] } }, Pick: { id: "p1", name: "Pick", type: "select", select: { options: [{ name: "X" }] } },
+  Due: { id: "d1", name: "Due", type: "date", date: {} }, Qty: { id: "q1", name: "Qty", type: "number", number: {} }, Done: { id: "c1", name: "Done", type: "checkbox", checkbox: {} },
+  Site: { id: "u1", name: "Site", type: "url", url: {} }, Notes: { id: "n1", name: "Notes", type: "rich_text", rich_text: {} }, Owner: { id: "o1", name: "Owner", type: "people", people: {} }, Calc: { id: "f1", name: "Calc", type: "formula", formula: {} } } };
+const ROW = { object: "page", id: ROW1, in_trash: false, last_edited_time: "2026-09-02T00:00:00Z", parent: { type: "data_source_id", data_source_id: DS1, database_id: DB1 }, url: "https://www.notion.so/SECRET",
+  properties: { Name: { type: "title", title: [{ plain_text: "Write report" }] }, Status: { type: "status", status: { name: "Doing" } }, Tags: { type: "multi_select", multi_select: [{ name: "a" }] }, Pick: { type: "select", select: null },
+    Due: { type: "date", date: { start: "2026-10-05" } }, Qty: { type: "number", number: 3 }, Done: { type: "checkbox", checkbox: false }, Site: { type: "url", url: "https://x.example" }, Notes: { type: "rich_text", rich_text: [{ plain_text: "hello" }] },
+    Owner: { type: "people", people: [{ person: { email: "p@q.r" } }] } } };
 beforeEach(() => {
   calls = []; revoked = []; notionStatus = 200;
   core = new StoreCore(new FakeKV(), { seal: async (p, aad) => `sealed:${aad}:${p}`, open: async (s, aad) => s.slice(`sealed:${aad}:`.length), revoke: (app, t, access) => { revoked.push([app + "/" + access, t]); } });
@@ -151,7 +161,15 @@ beforeEach(() => {
     if (u === "https://oauth2.googleapis.com/token") return Response.json({ access_token: "ya29.G", expires_in: 3599, scope: "https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/tasks" });
     if (!u.startsWith("https://api.notion.com/v1/")) return new Response("{}", { status: 404 });
     if (notionStatus !== 200) return new Response("{}", { status: notionStatus, headers: notionStatus === 429 ? { "Retry-After": "11" } : {} });
-    if (u.endsWith("/v1/search")) return Response.json(SEARCH);
+    if (u.endsWith("/v1/search")) {
+      if (String(init?.body).includes('"data_source"')) return Response.json({ results: [{ object: "data_source", id: DS1, title: [{ plain_text: "Tasks DB" }], last_edited_time: "2026-09-03T00:00:00Z", url: "https://www.notion.so/SECRET" }, { object: "page", id: P1 }, { object: "data_source", id: "bad", title: [] }], has_more: false, next_cursor: null });
+      return Response.json(SEARCH);
+    }
+    if (method === "GET" && u === `https://api.notion.com/v1/databases/${DB1}`) return Response.json({ title: [{ plain_text: "Projects" }], data_sources: [{ id: DS1, name: "Tasks DB" }, { id: "bad", name: "x" }] });
+    if (method === "GET" && u === `https://api.notion.com/v1/data_sources/${DS1}`) return Response.json(SCHEMA);
+    if (method === "POST" && u === `https://api.notion.com/v1/data_sources/${DS1}/query`) return Response.json({ results: [ROW, { object: "page", id: P2, in_trash: true }, { object: "database", id: B1 }], has_more: true, next_cursor: CUR });
+    if (method === "GET" && u === `https://api.notion.com/v1/pages/${ROW1}`) return Response.json(ROW);
+    if (method === "PATCH" && u === `https://api.notion.com/v1/pages/${ROW1}`) return Response.json({ object: "page", id: ROW1 });
     if (method === "GET" && /\/v1\/pages\/[\w-]+$/.test(u)) return Response.json({ object: "page", id: P1, properties: { Name: { type: "title", title: [{ plain_text: "Project plan" }] }, Status: { type: "status", status: { name: "Doing" } } } });
     if (method === "GET" && u.includes("/children")) return Response.json({ results: [
       { id: B1, type: "heading_1", heading_1: { rich_text: [{ plain_text: "Goals" }] } },
@@ -167,7 +185,10 @@ beforeEach(() => {
 afterEach(() => {
   expect(calls.some((c) => c.method === "DELETE")).toBe(false);
   // nothing that edits, moves or trashes an existing page, and no account information is requested (R14, R26)
-  expect(calls.some((c) => c.method === "PATCH" && !c.url.endsWith("/children"))).toBe(false);
+  // PATCH exists only to append children, or to set `properties` of a row (never title/trash/archive/icon/cover/lock, never blocks) (v4.1)
+  for (const c of calls.filter((x) => x.method === "PATCH" && !x.url.endsWith("/children")))
+    expect([c.url.replace(/[0-9a-f-]{36}$/, "<id>"), Object.keys(JSON.parse(c.body!))]).toEqual(["https://api.notion.com/v1/pages/<id>", ["properties"]]);
+  expect(calls.some((c) => /\/(data_sources|databases)\/[^/]+$/.test(c.url) && c.method === "PATCH")).toBe(false); // the schema is never changed
   expect(calls.some((c) => /\/users(\/|\?|$)/.test(c.url))).toBe(false);
 });
 
@@ -410,5 +431,158 @@ describe("Notion errors", () => {
     notionStatus = 200;
     expect((await post("/notion/search", {}, h)).status).toBe(401); // session removed
     expect(revoked).toHaveLength(1);
+  });
+});
+
+// ================================================================ v4.1: databases
+describe("database helpers", () => {
+  const cols = schemaOut(SCHEMA);
+  it("schema: types, editability, bounded options; names are plain one-line text", () => {
+    expect(cols.map((c) => [c.name, c.type, c.editable])).toEqual([["Name", "title", true], ["Status", "status", true], ["Tags", "multi_select", true], ["Pick", "select", true], ["Due", "date", true], ["Qty", "number", true], ["Done", "checkbox", true], ["Site", "url", true], ["Notes", "rich_text", true], ["Owner", "people", false], ["Calc", "formula", false]]);
+    expect(cols[1].options).toEqual(["Todo", "Doing", "Done"]);
+    expect(schemaOut({ properties: Object.fromEntries(Array.from({ length: 90 }, (_, i) => ["p" + i, { name: "p" + i, type: "number" }])) })).toHaveLength(50);
+    expect(schemaOut({ properties: { a: { name: "x\n<b>y", type: "BAD TYPE!" } } })).toEqual([{ name: "x <b>y", type: "unsupported", editable: false }]);
+    expect(schemaOut(null)).toEqual([]);
+    expect(schemaOut({ properties: { s: { name: "S", type: "select", select: { options: Array(300).fill({ name: "o" }) } } } })[0].options).toHaveLength(100);
+  });
+  it("values are checked against the REAL column type and options; nothing is coerced; new options are never created", () => {
+    const c = (n: string) => cols.find((x) => x.name === n)!;
+    expect(propertyValue(c("Name"), " A\nB ")).toEqual({ title: [{ type: "text", text: { content: "A B" } }] });
+    expect(propertyValue(c("Notes"), "multi\nline")).toEqual({ rich_text: [{ type: "text", text: { content: "multi\nline" } }] });
+    expect(propertyValue(c("Notes"), "")).toEqual({ rich_text: [] });
+    expect(propertyValue(c("Qty"), 4.5)).toEqual({ number: 4.5}); expect(propertyValue(c("Qty"), null)).toEqual({ number: null });
+    expect(propertyValue(c("Done"), true)).toEqual({ checkbox: true });
+    expect(propertyValue(c("Due"), "2026-10-05")).toEqual({ date: { start: "2026-10-05" } }); expect(propertyValue(c("Due"), null)).toEqual({ date: null });
+    expect(propertyValue(c("Status"), "Done")).toEqual({ status: { name: "Done" } });
+    expect(propertyValue(c("Pick"), "")).toEqual({ select: null });
+    expect(propertyValue(c("Tags"), ["a", "a", "b"])).toEqual({ multi_select: [{ name: "a" }, { name: "b" }] });
+    expect(propertyValue(c("Site"), "https://ok.example/p?q=1")).toEqual({ url: "https://ok.example/p?q=1" });
+    const bad: Array<[string, unknown]> = [["Name", ""], ["Name", 5], ["Name", "x".repeat(301)], ["Qty", "5"], ["Qty", NaN], ["Qty", Infinity], ["Qty", 1e20], ["Done", "true"], ["Done", null], ["Due", "2026-02-30"], ["Due", "tomorrow"], ["Due", 5],
+      ["Status", "Nope"], ["Status", null], ["Status", ""], ["Pick", "Y"], ["Tags", ["z"]], ["Tags", "a"], ["Tags", Array(21).fill("a")], ["Site", "javascript:alert(1)"], ["Site", "data:text/html,x"], ["Site", "http://a b"], ["Site", 5], ["Notes", "x".repeat(2001)], ["Notes", 5]];
+    for (const [n, v] of bad) expect(() => propertyValue(c(n), v), `${n}=${JSON.stringify(v)}`).toThrow();
+    expect(() => propertyValue(c("Owner"), "x")).toThrow(); expect(() => propertyValue(c("Calc"), 1)).toThrow();
+    expect(propertyValue({ name: "E", type: "email", editable: true }, "a@b.co")).toEqual({ email: "a@b.co" });
+    expect(() => propertyValue({ name: "E", type: "email", editable: true }, "a@b")).toThrow();
+    expect(propertyValue({ name: "P", type: "phone_number", editable: true }, "+1 (555) 010-9999")).toEqual({ phone_number: "+1 (555) 010-9999" });
+    expect(() => propertyValue({ name: "P", type: "phone_number", editable: true }, "<script>")).toThrow();
+    expect(validDate("2026-10-05")).toBe(true); expect(validDate("2026-13-05")).toBe(false);
+  });
+  it("buildProperties: only real, editable columns; the Relay chooses the key and the type; create needs a title", () => {
+    expect(buildProperties(cols, { Name: "T", Qty: 2 }, true)).toEqual({ Name: { title: [{ type: "text", text: { content: "T" } }] }, Qty: { number: 2 } });
+    expect(buildProperties(cols, { Qty: 2 }, false)).toEqual({ Qty: { number: 2 } });
+    for (const [v, creating] of [[{ Qty: 2 }, true], [{}, false], [null, false], [[], false], ["x", false], [{ Nope: 1 }, false], [{ Owner: "x" }, false], [{ Calc: 1 }, false], [{ ["__proto__"]: 1 }, false], [{ constructor: 1 }, false],
+      [Object.fromEntries(Array.from({ length: 31 }, (_, i) => ["Qty" + i, 1])), false], [{ "Qty ": 1 }, false], [{ qty: 1 }, false]] as Array<[unknown, boolean]>)
+      expect(() => buildProperties(cols, v, creating), JSON.stringify(v)).toThrow();
+    expect(() => buildProperties(cols, JSON.parse('{"__proto__": 1}'), false)).toThrow();
+  });
+  it("row values for the edit form", () => {
+    expect(rowValues(ROW, cols)).toEqual({ Name: "Write report", Status: "Doing", Tags: ["a"], Pick: "", Due: "2026-10-05", Qty: 3, Done: false, Site: "https://x.example", Notes: "hello" });
+    expect(rowValues({}, cols).Done).toBe(false);
+  });
+});
+
+describe("databases: reading", () => {
+  it("search for databases returns data sources only (id, title)", async () => {
+    const h = await rd();
+    const j = await (await post("/notion/search", { kind: "databases", query: "task" }, h)).json() as any;
+    expect(j.results).toEqual([{ id: DS1, title: "Tasks DB", edited: "2026-09-03T00:00:00Z" }]);
+    expect(JSON.stringify(j)).not.toMatch(/SECRET|notion\.so/);
+    expect(JSON.parse(calls.find((c) => c.url.endsWith("/v1/search"))!.body!).filter).toEqual({ property: "object", value: "data_source" });
+    expect((await post("/notion/search", { kind: "everything" }, h)).status).toBe(400);
+    expect((await post("/notion/search", { kind: ["databases"] }, h)).status).toBe(400);
+  });
+  it("a database id (from a child_database block) is turned into data source ids", async () => {
+    const h = await rd();
+    expect(await (await call(`/notion/databases/${DB1}`, { headers: h })).json()).toEqual({ title: "Projects", sources: [{ id: DS1, name: "Tasks DB" }] });
+  });
+  it("schema", async () => {
+    const h = await rd();
+    const j = await (await call(`/notion/datasources/${DS1}`, { headers: h })).json() as any;
+    expect(j.title).toBe("Tasks DB"); expect(j.columns).toHaveLength(11); expect(j.columns[1]).toEqual({ name: "Status", type: "status", editable: true, options: ["Todo", "Doing", "Done"] });
+  });
+  it("rows: Relay-built query (newest first, 25), trashed/non-page results dropped, links and authors never returned", async () => {
+    const h = await rd();
+    const j = await (await call(`/notion/datasources/${DS1}/rows?cursor=${CUR}`, { headers: h })).json() as any;
+    expect(j.rows).toEqual([{ id: ROW1, title: "Write report", edited: "2026-09-02T00:00:00Z", cells: [{ name: "Status", value: "Doing" }, { name: "Tags", value: "a" }, { name: "Due", value: "2026-10-05" }, { name: "Qty", value: "3" }, { name: "Done", value: "no" }, { name: "Site", value: "https://x.example" }] }]);
+    expect(j.next).toBe(CUR); expect(JSON.stringify(j)).not.toMatch(/SECRET|notion\.so|p@q\.r/);
+    const q = calls.find((c) => c.url.endsWith("/query"))!;
+    expect(q.method).toBe("POST"); expect(JSON.parse(q.body!)).toEqual({ page_size: 25, sorts: [{ timestamp: "last_edited_time", direction: "descending" }], start_cursor: CUR });
+  });
+  it("rows: title search uses the real title column name", async () => {
+    const h = await rd();
+    await call(`/notion/datasources/${DS1}/rows?q=${encodeURIComponent("rep'ort")}`, { headers: h });
+    expect(JSON.parse(calls.find((c) => c.url.endsWith("/query"))!.body!).filter).toEqual({ property: "Name", title: { contains: "rep'ort" } });
+    expect((await call(`/notion/datasources/${DS1}/rows?q=${"x".repeat(201)}`, { headers: h })).status).toBe(400);
+  });
+  it("one row with schema and values; non-rows are refused", async () => {
+    const h = await rd();
+    const j = await (await call(`/notion/rows/${ROW1}`, { headers: h })).json() as any;
+    expect(j).toMatchObject({ id: ROW1, dataSourceId: DS1, title: "Write report" }); expect(j.values.Status).toBe("Doing"); expect(j.values.Owner).toBeUndefined(); expect(j.columns).toHaveLength(11);
+    expect((await call(`/notion/rows/${P1}`, { headers: h })).status).toBeGreaterThanOrEqual(400); // generic page mock has no row parent
+  });
+  it("a page response says whether it is a database row", async () => {
+    const h = await rd();
+    const mk = async (id: string) => (await (await call(`/notion/pages/${id}`, { headers: h })).json() as any).isRow;
+    expect(await mk(P1)).toBe(false);
+    expect(await mk(ROW1)).toBe(true);
+  });
+  it("ids and cursors are strict for every database route", async () => {
+    const h = await rd(); calls.length = 0;
+    for (const id of ["x", DS1.toUpperCase(), DS1 + "/rows", "a'b", "..%2Fx", DS1.replace(/-/g, "")]) for (const path of ["/notion/databases/", "/notion/datasources/", "/notion/rows/"])
+      expect([id, path, (await call(path + encodeURIComponent(id), { headers: h })).status]).toEqual([id, path, 400]);
+    for (const cur of ["x", CUR.toUpperCase(), CUR + "&a=1"]) expect((await call(`/notion/datasources/${DS1}/rows?cursor=${encodeURIComponent(cur)}`, { headers: h })).status).toBe(400);
+    expect(calls).toEqual([]);
+  });
+});
+
+describe("databases: writing rows", () => {
+  it("a read session cannot create or edit rows (Relay side), and nothing is sent", async () => {
+    const h = await rd(); calls.length = 0;
+    const r = await Promise.all([post(`/notion/datasources/${DS1}/rows`, { values: { Name: "x" } }, h), post(`/notion/rows/${ROW1}/update`, { values: { Qty: 1 } }, h)]);
+    expect(r.map((x) => x.status)).toEqual([403, 403]); expect(calls).toEqual([]);
+  });
+  it("create row: the Relay reads the schema, builds typed properties, parent = the data source", async () => {
+    const h = await wr(); calls.length = 0;
+    const r = await post(`/notion/datasources/${DS1}/rows`, { values: { Name: "New task", Status: "Todo", Tags: ["a", "b"], Qty: 2, Due: "2026-11-01", Done: false }, parent: { page_id: P1 }, icon: "x", archived: true, properties: { evil: 1 } }, h);
+    expect(r.status).toBe(200); expect(await r.json()).toEqual({ id: P2 });
+    expect(calls.map((c) => c.method + " " + c.url.replace("https://api.notion.com/v1", "").replace(DS1, "<ds>"))).toEqual(["GET /data_sources/<ds>", "POST /pages"]);
+    expect(JSON.parse(calls[1].body!)).toEqual({ parent: { type: "data_source_id", data_source_id: DS1 }, properties: {
+      Name: { title: [{ type: "text", text: { content: "New task" } }] }, Status: { status: { name: "Todo" } }, Tags: { multi_select: [{ name: "a" }, { name: "b" }] }, Qty: { number: 2 }, Due: { date: { start: "2026-11-01" } }, Done: { checkbox: false } } });
+  });
+  it("create row: invalid input is rejected BEFORE anything is written or counted", async () => {
+    const h = await wr(); calls.length = 0;
+    const bad: unknown[] = [{}, { values: {} }, { values: { Qty: 1 } }, { values: { Name: "" } }, { values: { Name: "x", Nope: 1 } }, { values: { Name: "x", Owner: "p" } }, { values: { Name: "x", Calc: 1 } }, { values: { Name: "x", Status: "Evil" } }, { values: { Name: "x", Pick: "new option" } },
+      { values: { Name: "x", Site: "javascript:1" } }, { values: { Name: "x", Qty: "5" } }, { values: "Name" }, { values: [["Name", "x"]] }];
+    for (const b of bad) { (core as any).rl.clear(); expect([JSON.stringify(b), (await post(`/notion/datasources/${DS1}/rows`, b, h)).status]).toEqual([JSON.stringify(b), 400]); }
+    expect(calls.filter((c) => c.method !== "GET")).toEqual([]);
+    expect((await post(`/notion/datasources/x/rows`, { values: { Name: "x" } }, h)).status).toBe(400);
+  });
+  it("edit row: PATCH carries ONLY `properties`, keys come from the real schema, parent comes from Notion", async () => {
+    const h = await wr(); calls.length = 0;
+    const r = await post(`/notion/rows/${ROW1}/update`, { values: { Status: "Done", Qty: null, Tags: [], Notes: "new text", Due: null }, in_trash: true, archived: true, icon: { emoji: "x" }, cover: null, is_locked: true, dataSourceId: P1, parent: { page_id: P1 } }, h);
+    expect(r.status).toBe(200);
+    expect(calls.map((c) => c.method + " " + c.url.replace("https://api.notion.com/v1", "").replace(ROW1, "<row>").replace(DS1, "<ds>"))).toEqual(["GET /pages/<row>", "GET /data_sources/<ds>", "PATCH /pages/<row>"]);
+    expect(JSON.parse(calls[2].body!)).toEqual({ properties: { Status: { status: { name: "Done" } }, Qty: { number: null }, Tags: { multi_select: [] }, Notes: { rich_text: [{ type: "text", text: { content: "new text" } }] }, Due: { date: null } } });
+  });
+  it("edit row: not a row, bad values, unknown/uneditable columns -> nothing is sent", async () => {
+    const h = await wr(); calls.length = 0;
+    expect((await post(`/notion/rows/${P1}/update`, { values: { Qty: 1 } }, h)).status).toBeGreaterThanOrEqual(400);
+    for (const v of [{}, { Nope: 1 }, { Owner: "x" }, { Calc: 1 }, { Status: "Evil" }, { Name: "" }, { Due: "soon" }, { Tags: ["zzz"] }, "x", null]) { (core as any).rl.clear(); expect([JSON.stringify(v), (await post(`/notion/rows/${ROW1}/update`, { values: v }, h)).status]).toEqual([JSON.stringify(v), 400]); }
+    expect(calls.filter((c) => c.method !== "GET")).toEqual([]);
+    for (const id of ["x", ROW1.toUpperCase(), ROW1 + "/x"]) expect((await post(`/notion/rows/${encodeURIComponent(id)}/update`, { values: { Qty: 1 } }, h)).status).toBe(400);
+  });
+  it("there is still no schema change, row delete/trash, or generic page edit route", async () => {
+    const h = await wr(); calls.length = 0;
+    for (const [m, path] of [["DELETE", `/notion/rows/${ROW1}`], ["POST", `/notion/rows/${ROW1}/delete`], ["POST", `/notion/rows/${ROW1}/trash`], ["POST", `/notion/rows/${ROW1}/archive`], ["PATCH", `/notion/rows/${ROW1}`],
+      ["POST", `/notion/datasources/${DS1}`], ["PATCH", `/notion/datasources/${DS1}`], ["POST", `/notion/datasources/${DS1}/properties`], ["DELETE", `/notion/databases/${DB1}`], ["POST", `/notion/databases/${DB1}`], ["POST", `/notion/databases`]] as const)
+      expect([path, (await call(path, { method: m, headers: h, body: m === "POST" ? "{}" : undefined })).status]).toEqual([path, 404]);
+    expect(calls).toEqual([]);
+  });
+  it("row writes share the per-session allowance and the per-minute limit", async () => {
+    const h = await wr();
+    for (let i = 0; i < MAX_NOTION_WRITES; i++) { if (i % 10 === 0) (core as any).rl.clear(); expect((await post(`/notion/rows/${ROW1}/update`, { values: { Qty: i } }, h)).status).toBe(200); }
+    (core as any).rl.clear();
+    const over = await post(`/notion/datasources/${DS1}/rows`, { values: { Name: "one more" } }, h);
+    expect([over.status, await over.json()]).toEqual([429, { error: "write_limit" }]);
   });
 });

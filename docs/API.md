@@ -44,13 +44,30 @@ Ids are lower-case dashed UUIDs (`^[0-9a-f]{8}-…-[0-9a-f]{12}$`), cursors are 
 
 | Path | Access | Notes |
 |---|---|---|
-| `POST /notion/search` `{query?, cursor?}` | read | Title search over pages shared with the integration, newest edit first, 20 per page. Returns `{results:[{id,title,edited}], next}`. Empty query = recently edited pages. Trashed pages and non-pages are dropped |
+| `POST /notion/search` `{query?, cursor?, kind?}` | read | Title search, newest edit first, 20 per page. `kind` = `pages` (default) or `databases` (returns data sources). Returns `{results:[{id,title,edited}], next}`. Empty query = recently edited. Trashed items and other object types are dropped |
 | `GET /notion/pages/:id?cursor=` | read | `{id, title, props:[{name,value}], blocks:[{id,type,text,hasChildren,checked?,language?}], next}`. `title`/`props` only on the first page of results (no `cursor`). 100 blocks per page; `props` = up to 25 simple property types as text |
 | `GET /notion/blocks/:id/children?cursor=` | read | Same block shape, for expanding toggles, lists, tables, columns |
 | `POST /notion/pages` `{parentId, title, text?}` | write | Creates a page **under a page** (`parentId`). Title 1–300 chars, one line. `text` ≤ 20 000 chars: blank line = new paragraph, paragraphs cut at 1900 chars, ≤ 100 blocks. Returns `{id,title}` (no URL) |
 | `POST /notion/blocks/:id/append` `{text}` | write | Appends plain paragraphs at the **end** of a page/block. Same text limits. Returns `{ok,added}` |
 
-Limits: 120 requests/min, 10 writes/min, **20 writes per session** (`write_limit`, counted after validation). Errors: `session_expired`, `notion_forbidden` (page not shared, or the integration lacks the capability), `not_found` (Notion gives the same answer for unshared pages), `notion_rate_limited` (+`Retry-After`), `notion_unavailable`, `notion_bad_request`, `bad_id`, `bad_cursor`, `bad_query`, `bad_title`, `bad_text`, `too_many_blocks`, `read_only`.
+### Databases (v4.1)
+
+In Notion's current API a *database* contains *data sources* (tables) whose rows are pages. A database must be **shared with the connection** to be searched or queried. Property writes are built by the Relay from the data source's **real schema** (fetched from Notion on every write): the browser only sends `{columnName: value}`; the Relay checks the column exists and is editable, takes the type from the schema, validates the value, and sends it under the real column name.
+
+| Path | Access | Notes |
+|---|---|---|
+| `GET /notion/databases/:id` | read | For `child_database` blocks (they carry a database id): `{title, sources:[{id,name}]}` |
+| `GET /notion/datasources/:id` | read | `{id, title, columns:[{name,type,editable,options?}]}` (≤ 50 columns, ≤ 100 options each). Editable types: title, rich_text, number, select, multi_select, status, date, checkbox, url, email, phone_number |
+| `GET /notion/datasources/:id/rows?cursor=&q=` | read | 25 rows newest-edit first: `{rows:[{id,title,edited,cells:[{name,value}]}], next}`. `q` = title contains. No other filters or sorts are accepted |
+| `GET /notion/rows/:id` | read | One row for the edit form: `{id, dataSourceId, title, columns, values}`. 400 `not_a_row` for ordinary pages |
+| `POST /notion/datasources/:id/rows` `{values}` | write | Creates a row. `values` = `{ColumnName: value}` (1–30 entries, title required). Value formats: text (title ≤ 300 one line, rich_text ≤ 2000), number or `null`, `"YYYY-MM-DD"` or `null`, boolean, option name(s) that **already exist** (new options are never created), `https://` URL, e-mail, phone. Returns `{id}` |
+| `POST /notion/rows/:id/update` `{values}` | write | Edits properties of a row. The Relay looks up the row's data source itself (the browser cannot name it) and sends **only** `{properties}` to `PATCH /v1/pages/:id` |
+
+`GET /notion/pages/:id` also returns `isRow`. Extra errors: `unknown_property`, `property_not_editable`, `unknown_option`, `bad_value`, `bad_values`, `not_a_row`.
+
+Not available (404): changing a database/data source schema, adding columns or options, trashing/archiving/moving rows or pages, editing page text or blocks, relations/people/files/formulas as writable values.
+
+Limits: 120 requests/min, 10 writes/min, **50 writes per session** (page creates, appends, row creates and row edits together; `write_limit`, counted after validation). Errors: `session_expired`, `notion_forbidden` (page not shared, or the integration lacks the capability), `not_found` (Notion gives the same answer for unshared pages), `notion_rate_limited` (+`Retry-After`), `notion_unavailable`, `notion_bad_request`, `bad_id`, `bad_cursor`, `bad_query`, `bad_title`, `bad_text`, `too_many_blocks`, `read_only`.
 
 ## Google Tasks (Bearer capability of app `tasks`) — v3.1
 

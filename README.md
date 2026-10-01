@@ -1,11 +1,11 @@
-# Sakkol Workspace (v4)
+# Sakkol Workspace (v4.1)
 
 A small personal workspace for **untrusted shared computers**. You unlock each app with your **trusted phone**; the shared browser never sees a password and never stores a login.
 
 | App | Access levels |
 |---|---|
 | Gmail | read-only, or read & write (send, reply, star, archive, trash) |
-| **Notion (new in v4)** | read-only (search and read pages you shared), or read & write (create pages, append text; no edit/delete) |
+| **Notion** | read-only (search pages, browse databases and rows), or read & write (create pages, append text, add and edit database rows; no delete) |
 | Google Tasks | read-only, or read & write (add, edit, complete; no delete) |
 | Outlook / Hotmail | read-only, or read & write (send, reply, flag, archive, delete = move to Deleted Items) |
 | Spotify | remote control of your own devices, or a web player in a separate tab |
@@ -28,13 +28,20 @@ Shared browser  ──capability──▶  Relay (Cloudflare Worker + Durable Ob
      └── QR + typed code ── your phone ── OAuth consent (PKCE)
 ```
 
-## What v4 adds: Notion
+## What v4.1 adds: Notion databases
+
+- **Databases tab:** search databases, open a table's rows (title search, paging), open a row as a page; databases inside a page open from the page.
+- **Add and edit rows** with a typed form (text, number, select, multi-select, status, date, checkbox, URL, e-mail, phone) and a review step. Other column types are read-only.
+- The Relay reads the real column schema from Notion for every write and builds the values itself; it never creates new select options and never changes a database's structure. The only page update it can send is `{properties}`.
+- Editing needs **"Update content"** on the Write connection (see `docs/SECURITY.md` v4.1 for the trade-off). Write allowance is now 50 per session.
+
+## What v4 added: Notion
 
 - Search page titles, read pages as plain text (nested blocks on demand), and in write mode create a page under a page or append text at the end of a page. No editing or deleting.
 - **Two Notion connections** ("Read" with *read content* only, "Write" with read + insert) so **Notion itself** enforces read-only. The Relay also refuses writes for read sessions.
 - Notion has no scopes and no PKCE: the owner chooses the shared pages on Notion's own screen; the exception to PKCE is documented in `docs/SECURITY.md`.
 - Nothing is kept from Notion's token response except the access token (refresh token, workspace and owner info are dropped). Lock revokes the token at Notion.
-- Write limits: 10/min and 20 per session. Images, files and link targets are never shown.
+- Write limits: 10/min and 50 per session (since v4.1). Images, files and link targets are never shown.
 
 ## What v3.1 added: Google Tasks and the Google bundle
 

@@ -182,7 +182,7 @@ Notion's token API has no `code_verifier`, so PKCE S256 is impossible for this v
 - **Session:** 30 min max, 5 min idle. Notion gives no expiry, so the app maximum applies; if Notion rejects the token earlier the session is removed. On Lock/expiry the Relay **revokes the token at Notion** with the matching integration's credentials (best effort).
 - **Bounded, inert rendering (R12):** only `plain_text` of rich text is used (no links, mention targets or annotations); text lands in DOM text nodes; file/image/embed/bookmark URLs (pre-signed, expiring) are never surfaced, only `[image]` and the caption; block text ≤ 4000 chars, 100 blocks per request, nested blocks load only on request and only 3 levels deep in the UI; unknown block types become a placeholder; types and ids are pattern-checked before being returned.
 - **Strict inputs (R13):** UUID-only ids and cursors (lower-case, dashed), title/text length limits, Relay-built request bodies (parent `page_id`, plain paragraphs). `archived`/`in_trash` is never written; the Notion client cannot send `DELETE`, and `PATCH` only exists for appending children (a test fails if any other PATCH or a DELETE is ever sent).
-- **Write caps (R14):** 10 writes/min and **20 per session**, counted in the Durable Object after validation. New content is additive only (create page, append at the end). There is no edit and no delete in this workspace; remove mistakes in Notion.
+- **Write caps (R14):** 10 writes/min and **50 per session** (raised from 20 in v4.1 when row edits were added), counted in the Durable Object after validation. New content is additive only (create page, append at the end). There is no edit and no delete in this workspace; remove mistakes in Notion.
 
 ## Residual risks
 - The Notion token cannot be shortened by us; Lock revokes it, but if that best-effort call fails it lives until Notion expires it. It never leaves the Relay.
@@ -197,3 +197,34 @@ Notion's token API has no `code_verifier`, so PKCE S256 is impossible for this v
 - [ ] Read-only session shows no "Add text / New page" buttons; with the Write integration's capabilities reduced to read-only in Notion, writes fail on Notion's side too
 - [ ] "Add text" appends at the end of the page; nothing existing is changed. "New page here" creates a child page
 - [ ] After DONE, the old capability is 401; `wrangler tail` shows no token, e-mail or page content
+
+
+---
+
+# v4.1 addendum: Notion databases (browse, add rows, edit rows)
+
+Chosen by the owner: browse + add + **edit** rows. This is the first feature that changes existing content, so it is spelled out here.
+
+## What was added
+Search for databases; open a database's rows (25 at a time, title search, newest first); open a row as a page; create a row; edit a row's simple properties. Notion's current API (2025-09-03 and later, we use 2026-03-11) splits a *database* into *data sources*; rows are pages with a data-source parent. A `child_database` block carries a database id, which the Relay turns into data source ids.
+
+## Controls
+- **The browser never decides types or keys.** For every create/update the Relay fetches the data source's schema from Notion, requires each named column to exist and be editable, derives the value type **from the schema**, validates the value for that type (dates are real dates; numbers finite; URLs must be `http(s)`; e-mail/phone patterns; text lengths) and uses Notion's own column name as the key. Unknown columns, uneditable types (people, relations, files, formulas, rollups…) and everything else are `400` with nothing sent to Notion.
+- **No schema or option changes:** select/multi-select/status values must already exist as options (Notion would otherwise create them on the fly). There is no route that touches a data source or database definition (a test asserts no `PATCH` to `/data_sources` or `/databases`).
+- **The only PATCH to a page is `{properties}`.** Never `in_trash`/`archived`, title-as-attribute, icon, cover, lock or `erase_content`, and never block edits. A test inspects every request the Relay sends and fails on any other PATCH body.
+- **Row parent comes from Notion:** for an edit, the Relay reads the page, takes `parent.data_source_id` from Notion's answer and refuses ordinary pages (`not_a_row`); for a create, the browser supplies the data source id, which must be a UUID and must exist (schema fetch).
+- **Read-only unchanged:** read sessions get `403` on all write routes (Relay), and the *Read* connection has no write capability (Notion).
+- **Allowance:** page creates, appends, row creates and row edits share **50 writes per session** and 10/min. Validation failures do not consume it.
+- UI: create/edit show a **review step** (for edits, "old → new" per changed property), then confirm. There is still no delete or undo in the workspace.
+
+## New residual risk and required Notion-side change
+- Editing rows needs **"Update content"** on the *Write* connection. In Notion that capability lets the connection modify existing content (pages and blocks) of every page shared with it. **The Relay is the boundary**: it exposes no route for block/page-text edits, trashing or schema changes, and a test enforces the PATCH shape. If the Relay were compromised, the Write token could do more than the UI. Share only what you need with the Write connection, and keep the *Read* connection at "Read content" only.
+- Existing Write-connection approvals may need to be repeated after the capability change.
+- Property edits overwrite values; Notion's page history is the only undo. Date properties that had a time are saved as a plain date when edited here.
+
+## Manual checklist additions (v4.1)
+- [ ] Write connection capabilities: Read content, Insert content, **Update content** (no comments, no user information); Read connection: Read content only
+- [ ] A database shared on the approval screen appears under Notion > Databases; its rows open as pages
+- [ ] Read-only session shows no New row / Edit properties buttons
+- [ ] Create a row, then edit a status and a date; the changes appear in Notion; nothing else on the row changed
+- [ ] The edit form cannot create new select options (only existing ones are offered)

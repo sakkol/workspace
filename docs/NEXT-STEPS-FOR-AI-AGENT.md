@@ -196,7 +196,7 @@ Guard-rails for future work touching this: keep the tests in `worker/test/core.t
 
 ### v4: Notion: BUILT
 
-**Status:** built with two Notion integrations (read / write), no PKCE (owner-approved exception, Notion has none), `noScopes` app type, JSON token exchange with Basic auth, per-access-level credentials, revoke at Notion on Lock, 20 writes per session. See docs/SECURITY.md v4 addendum. The original spec follows unchanged.
+**Status (v4.1 added databases: browse, add rows, edit rows; see docs/SECURITY.md):** built with two Notion integrations (read / write), no PKCE (owner-approved exception, Notion has none), `noScopes` app type, JSON token exchange with Basic auth, per-access-level credentials, revoke at Notion on Lock, 20 writes per session. See docs/SECURITY.md v4 addendum. The original spec follows unchanged.
 
 **Goal:** search and read pages, create a page and append text.
 
