@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "./env";
-import { APPS, AppId } from "./apps";
+import { APPS, AppId, Access } from "./apps";
 import { StoreCore, KV, TxCtx } from "./core";
 import { makeSealer } from "./security";
 import { VENDORS } from "./vendors";
@@ -16,9 +16,9 @@ export class Store extends DurableObject<Env> {
     this.core = new StoreCore(ctx.storage as unknown as KV, {
       seal: async (p, aad) => (await need()).seal(p, aad),
       open: async (s, aad) => (await need()).open(s, aad),
-      revoke: (app: AppId, token: string) => {
+      revoke: (app: AppId, token: string, access: Access) => {
         const rev = VENDORS[APPS[app].vendor].revoke;
-        if (rev) ctx.waitUntil(rev(token).catch(() => {}));
+        if (rev) ctx.waitUntil(rev(token, { env, access }).catch(() => {}));
       },
     });
   }

@@ -75,7 +75,7 @@ const bearer = (cap: string) => ({ Authorization: "Bearer " + cap });
 describe("router", () => {
   it("/health reports booleans only", async () => {
     const r = await call("/health", { origin: null });
-    expect(await r.json()).toEqual({ ok: true, configured: { tokenKey: true, google: true, microsoft: false, spotify: false, player: false } });
+    expect(await r.json()).toEqual({ ok: true, configured: { tokenKey: true, google: true, microsoft: false, notion: false, notionWrite: false, spotify: false, player: false } });
   });
 
   it("rejects API calls from other origins, and sets CORS only for the frontend", async () => {

@@ -19,8 +19,13 @@ MICROSOFT_REDIRECT_URI = "https://sakkol-relay.serdarakkol.workers.dev/oauth/mic
 MICROSOFT_TENANT = "consumers"
 PLAYER_ORIGIN = "https://sakkol-player.github.io"
 PLAYER_URL = "https://sakkol-player.github.io/player/"
+# # Notion (v4) is optional: TWO public connections (read / write) so Notion itself enforces read-only. Client IDs are public.
+# Leave a client id empty to disable that level. Secrets: NOTION_READ_CLIENT_SECRET and NOTION_WRITE_CLIENT_SECRET (wrangler secret put).
+NOTION_READ_CLIENT_ID = "3ecd872b-594c-8145-b716-003778f5dd21"
+NOTION_WRITE_CLIENT_ID = "3ecd872b-594c-81b7-b034-0037f635790b"
+NOTION_REDIRECT_URI = "https://sakkol-relay.serdarakkol.workers.dev/oauth/notion/callback"
 # Secrets (NEVER put these here). Set with `npx wrangler secret put NAME`:
-#   TOKEN_KEY, GOOGLE_CLIENT_SECRET, SPOTIFY_CLIENT_SECRET, MICROSOFT_CLIENT_SECRET
+#   TOKEN_KEY, GOOGLE_CLIENT_SECRET, SPOTIFY_CLIENT_SECRET, MICROSOFT_CLIENT_SECRET, NOTION_READ_CLIENT_SECRET, NOTION_WRITE_CLIENT_SECRET
 
 [[durable_objects.bindings]]
 name = "STORE"

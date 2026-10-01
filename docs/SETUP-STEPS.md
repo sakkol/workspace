@@ -135,6 +135,32 @@ Existing Gmail sessions are not affected. You do not need to re-consent Gmail un
 
 ---
 
+## Phase 8: Notion (v4, optional)
+
+Notion has no scopes, so read-only is enforced by **two separate Notion connections**: *Sakkol Notion Read* and *Sakkol Notion Write*. You need about 20 minutes. Do these yourself; never paste secrets into a chat. (Notion's screens change; if a label differs, pick the closest one and tell your assistant if something blocks you.)
+
+1. Open https://app.notion.com/developers/connections (Notion's developer portal; you must be an owner of the workspace).
+2. **Create a new connection**, type **Public**:
+   - Name: `Sakkol Notion Read`; associated workspace: yours.
+   - **Installation scope: Selected workspaces only**, and choose your workspace (this cannot be changed later).
+   - **Capabilities: tick only "Read content".** Leave "Update content", "Insert content", comment capabilities and user information **off**.
+   - **Redirect URI:** `https://sakkol-relay.serdarakkol.workers.dev/oauth/notion/callback` (exact).
+   - If the form insists on company name, website, privacy-policy or terms URLs, use your GitHub Pages site/repo; if it needs anything else (a review, a payment), stop and tell your assistant.
+3. Create a **second** public connection the same way: `Sakkol Notion Write`, same workspace and redirect URI, capabilities **"Read content" + "Insert content"** (no "Update content", no comments, no user information).
+4. On each connection's **Configuration / Secrets** tab copy the **OAuth client ID** and **OAuth client secret**.
+5. Put the two client IDs (public) into `worker/wrangler.toml`: `NOTION_READ_CLIENT_ID` and `NOTION_WRITE_CLIENT_ID`. Store the secrets and deploy:
+   ```bash
+   cd worker
+   npx wrangler secret put NOTION_READ_CLIENT_SECRET
+   npx wrangler secret put NOTION_WRITE_CLIENT_SECRET
+   npx wrangler deploy
+   ```
+6. `https://sakkol-relay.serdarakkol.workers.dev/health` must show `"notion":true` and `"notionWrite":true`. Commit `wrangler.toml` and push.
+7. First unlock: tile **Notion > Read only**, scan with the phone, type the code. Notion asks which pages to share: **select only what you want** (a parent page shares all its children). Check the screen says it can *read content*. Try **Read & write** later the same way; Notion shows the second connection's screen and permissions.
+8. You can change the shared pages later in Notion (Settings > Connections). Remove the connections there when you no longer want them.
+
+---
+
 ## Quick troubleshooting
 
 | Symptom | Fix |
@@ -143,6 +169,10 @@ Existing Gmail sessions are not affected. You do not need to re-consent Gmail un
 | Site loads but every action fails / CORS error | `FRONTEND_ORIGIN` must equal the page origin exactly (`https://sakkol.github.io`, no path, no trailing slash) |
 | Build fails "Set the repository variable VITE_RELAY_URL" | Add the variable in step Phase 2.1 |
 | Google `redirect_uri_mismatch` | The URI in Google Cloud must equal `GOOGLE_REDIRECT_URI` exactly |
+| Notion "not configured" | Phase 8 steps 5-6: client id in `wrangler.toml`, both secrets stored, `/health` shows `notion` / `notionWrite`. Each access level needs its own connection |
+| Notion search shows nothing / "not found" | The page was not shared on Notion's approval screen. Unlock again and select pages (or add the connection on the page: ••• > Connections) |
+| Notion "refused this request" on a write | The Write connection lacks "Insert content", or the page is not shared with it |
+| Notion `invalid_client` / unlock "failed" | Wrong client id/secret pair (read vs write swapped), or the redirect URI differs from the one in the connection |
 | Tasks: "Google refused this request" | Phase 7 step 1 (enable **Google Tasks API**) and step 2 (both Tasks scopes under Data Access); then lock and unlock again |
 | Bundle unlock says "did not grant the requested permission" | One of the permissions on Google's screen was unticked. The whole unlock is refused by design; try again with all ticked |
 | Google "access blocked" | Your account is not in **Test users** |

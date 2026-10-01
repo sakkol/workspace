@@ -8,6 +8,7 @@ import { handleGmail } from "./gmail";
 import { handleSpotify } from "./spotify";
 import { handleOutlook } from "./outlook";
 import { handleTasks } from "./tasks";
+import { handleNotion } from "./notion";
 
 export { Store } from "./store";
 
@@ -56,7 +57,7 @@ export default {
     if (p === "/health") {
       return new Response(JSON.stringify({
         ok: true,
-        configured: { tokenKey: !!env.TOKEN_KEY, google: configured(env, "google"), microsoft: configured(env, "microsoft"), spotify: configured(env, "spotify"), player: playerState === "ok" && configured(env, "spotify") },
+        configured: { tokenKey: !!env.TOKEN_KEY, google: configured(env, "google"), microsoft: configured(env, "microsoft"), notion: configured(env, "notion", "read"), notionWrite: configured(env, "notion", "write"), spotify: configured(env, "spotify"), player: playerState === "ok" && configured(env, "spotify") },
       }), { headers: { ...SEC, "Content-Type": "application/json" } });
     }
 
@@ -94,7 +95,7 @@ export default {
         if (stream && playerState !== "ok") return J({ error: playerState === "same_origin" ? "player_not_isolated" : "player_not_configured" }, 503);
         if (stream !== isPlayer) return J({ error: "wrong_origin" }, 403); // only the player origin starts "stream"; only the workspace starts everything else
         const app = typeof b.app === "string" && Object.hasOwn(APPS, b.app) ? (b.app as keyof typeof APPS) : null;
-        if (app && !configured(env, APPS[app].vendor)) return J({ error: "app_not_configured" }, 503);
+        if (app && !configured(env, APPS[app].vendor, b.access === "write" ? "write" : "read")) return J({ error: "app_not_configured" }, 503);
         const cf = (req as any).cf ?? {};
         const r = await store.newTx(b.app, b.access, b.claimHash, { country: cf.country, city: cf.city, ua: uaLabel(req.headers.get("User-Agent") || "") }, b.also);
         if ("error" in r) return J({ error: r.error }, r.error === "busy" ? 503 : 400);
@@ -127,20 +128,21 @@ export default {
       }
 
       // ---------------- OAuth (phone browser navigations) ----------------
-      if ((m = p.match(/^\/oauth\/(google|spotify|microsoft)$/)) && req.method === "GET") {
+      if ((m = p.match(/^\/oauth\/(google|spotify|microsoft|notion)$/)) && req.method === "GET") {
         if (!(await lim("oauth", 20))) return page("Too many requests", 429);
         const vendor = m[1] as VendorId;
         const b = await store.begin(u.searchParams.get("tx") || "", u.searchParams.get("n") || "");
-        if (!b || b.vendor !== vendor || !configured(env, vendor) || (b.access === "stream" && playerState !== "ok")) return redirect(`${env.FRONTEND_URL}#/p/x/error?r=expired`);
-        const cr = creds(env, vendor);
+        if (!b || b.vendor !== vendor || !configured(env, vendor, b.access) || (b.access === "stream" && playerState !== "ok")) return redirect(`${env.FRONTEND_URL}#/p/x/error?r=expired`);
+        const cr = creds(env, vendor, b.access);
         const q = new URLSearchParams({
           client_id: cr.id, redirect_uri: cr.redirect, response_type: "code",
-          scope: b.scope, state: b.state,
-          code_challenge: b.challenge, code_challenge_method: "S256", ...VENDORS[vendor].extra,
+          state: b.state, ...VENDORS[vendor].extra,
         });
+        if (b.scope) q.set("scope", b.scope); // Notion has no scopes
+        if (VENDORS[vendor].pkce !== false) { q.set("code_challenge", b.challenge); q.set("code_challenge_method", "S256"); }
         return redirect(authUrlFor(env, vendor) + "?" + q);
       }
-      if ((m = p.match(/^\/oauth\/(google|spotify|microsoft)\/callback$/)) && req.method === "GET") {
+      if ((m = p.match(/^\/oauth\/(google|spotify|microsoft|notion)\/callback$/)) && req.method === "GET") {
         if (!(await lim("cb", 20))) return page("Too many requests", 429);
         const vendor = m[1] as VendorId;
         const s = await store.takeState(u.searchParams.get("state") || "");
@@ -151,7 +153,7 @@ export default {
         const code = u.searchParams.get("code");
         if (u.searchParams.get("error") || !code) { await store.fail(s.id); return back("denied"); }
         let ex;
-        try { ex = await exchange(env, vendor, code, s.verifier, s.scope); }
+        try { ex = await exchange(env, vendor, code, s.verifier, s.scope, s.access); }
         catch { await store.fail(s.id); return back("failed"); }
         const r = await store.approve(s.id, ex);
         if (r === "scope") return back("scope");
@@ -170,6 +172,7 @@ export default {
         if (p.startsWith("/spotify/")) return await handleSpotify(c);
         if (p.startsWith("/outlook/")) return await handleOutlook(c);
         if (p.startsWith("/tasks/")) return await handleTasks(c);
+        if (p.startsWith("/notion/")) return await handleNotion(c);
       } catch (e) {
         // The vendor rejected our token: the session is useless, remove it.
         if (e instanceof HttpErr && e.status === 401 && bearer) await store.revoke(bearer);

@@ -160,3 +160,40 @@ Microsoft is a **new vendor** (`microsoft`), unlocked with its own QR scan. It i
 - [ ] Lock Gmail: Tasks keeps working. Lock Tasks afterwards: both gone. Then check https://myaccount.google.com/permissions still lists the app (Google keeps the entry) but the old token is dead
 - [ ] Read-only Tasks session shows no Add/Edit/checkbox controls
 - [ ] Completing a task in Sakkol shows it as completed in the Google Tasks app
+
+
+---
+
+# v4 addendum: Notion
+
+## Findings about Notion's OAuth (verified in Notion's docs, Sept 2026)
+- Authorize: `https://api.notion.com/v1/oauth/authorize?owner=user&client_id&redirect_uri&response_type=code&state`. **No scope parameter**: access is whatever pages the owner selects on Notion's approval screen, limited by the integration's *capabilities* configured in Notion.
+- Token: `POST https://api.notion.com/v1/oauth/token`, HTTP Basic (`client_id:client_secret`), **JSON** body, `Notion-Version` header. The response has `access_token` and a `refresh_token` (plus `bot_id`, workspace info and the **owner's name and e-mail**); it has **no `expires_in`**.
+- Revocation exists: `POST /v1/oauth/revoke` (Basic auth, JSON `{token}`). Latest API version is `2026-03-11`.
+- Rate limits: ~3 requests/s on personal plans. Text items are limited to 2000 characters, arrays to 100 elements.
+
+## SPEC CONFLICT resolved by the owner: no PKCE (R5)
+Notion's token API has no `code_verifier`, so PKCE S256 is impossible for this vendor. The owner accepted the exception (option A). `pkce: false` in the vendor definition means the Relay sends neither `code_challenge` nor `code_verifier`. Remaining protections: single-use `state` bound to the transaction, exact registered redirect URI, the typed code plus claim secret, and the client secret that never leaves the Relay (an intercepted authorization code cannot be exchanged by anyone else). The exception applies to Notion only; a test asserts Google, Microsoft and Spotify still send PKCE.
+
+## Controls
+- **Two integrations so Notion enforces read-only.** `read` unlocks use integration *Sakkol Notion Read* (capability: read content only) and `write` unlocks use *Sakkol Notion Write* (read + insert content; no update, no comments, no user information). Credentials are chosen by access level; a missing level is "not configured" and never falls back to the other one. The Relay additionally refuses every write route for `read` sessions (tested: nothing reaches Notion).
+- **No scopes**: `noScopes` apps skip scope verification *only* because the vendor has none (R8 stays mandatory for every app that has scopes; tested).
+- **Nothing kept from the token response** except the access token: the refresh token, bot id, workspace info and the owner's name and e-mail are dropped in `exchange()` (R6, R26), not stored, returned or logged.
+- **Session:** 30 min max, 5 min idle. Notion gives no expiry, so the app maximum applies; if Notion rejects the token earlier the session is removed. On Lock/expiry the Relay **revokes the token at Notion** with the matching integration's credentials (best effort).
+- **Bounded, inert rendering (R12):** only `plain_text` of rich text is used (no links, mention targets or annotations); text lands in DOM text nodes; file/image/embed/bookmark URLs (pre-signed, expiring) are never surfaced, only `[image]` and the caption; block text ≤ 4000 chars, 100 blocks per request, nested blocks load only on request and only 3 levels deep in the UI; unknown block types become a placeholder; types and ids are pattern-checked before being returned.
+- **Strict inputs (R13):** UUID-only ids and cursors (lower-case, dashed), title/text length limits, Relay-built request bodies (parent `page_id`, plain paragraphs). `archived`/`in_trash` is never written; the Notion client cannot send `DELETE`, and `PATCH` only exists for appending children (a test fails if any other PATCH or a DELETE is ever sent).
+- **Write caps (R14):** 10 writes/min and **20 per session**, counted in the Durable Object after validation. New content is additive only (create page, append at the end). There is no edit and no delete in this workspace; remove mistakes in Notion.
+
+## Residual risks
+- The Notion token cannot be shortened by us; Lock revokes it, but if that best-effort call fails it lives until Notion expires it. It never leaves the Relay.
+- Revoking may disconnect the integration from the workspace at Notion's side (not documented either way), in which case the next unlock asks for page selection again. Safe, slightly less convenient.
+- "Read only" relies on the owner configuring the **read** integration with *only* "Read content". If it is given more capabilities in Notion, the Relay still blocks writes for `read` sessions, but Notion would not.
+- A write session can add content to every page that was shared with the write integration. Share only what you need on Notion's approval screen.
+
+## Manual checklist additions (v4)
+- [ ] `/health` shows `"notion":true,"notionWrite":true`
+- [ ] Notion's approval screen for **Read** says it can *read content* only; for **Write** it adds *insert content* and nothing about comments/user information
+- [ ] Only the pages you selected appear in the workspace search; an unselected page returns "not found"
+- [ ] Read-only session shows no "Add text / New page" buttons; with the Write integration's capabilities reduced to read-only in Notion, writes fail on Notion's side too
+- [ ] "Add text" appends at the end of the page; nothing existing is changed. "New page here" creates a child page
+- [ ] After DONE, the old capability is 401; `wrangler tail` shows no token, e-mail or page content

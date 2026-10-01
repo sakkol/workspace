@@ -1,17 +1,22 @@
 // One entry per unlockable app. To add an app (Drive, Notion...), add it here, add a vendor in
 // vendors.ts if needed, add a route file, and add a tile in the frontend registry.
 
-export type AppId = "gmail" | "spotify" | "outlook" | "tasks";
+export type AppId = "gmail" | "spotify" | "outlook" | "tasks" | "notion";
 // "stream" = Spotify Web Playback SDK in the isolated player site: the browser receives a short-lived token ONCE at claim
 // (no Relay session, no capability). Only the player origin may start/claim it.
 export type Access = "read" | "write" | "stream";
-export type VendorId = "google" | "spotify" | "microsoft";
+export type VendorId = "google" | "spotify" | "microsoft" | "notion";
 
 export interface AppDef {
   id: AppId;
   vendor: VendorId;
   label: string;
   scopes: Partial<Record<Access, string>>; // space-separated
+  /**
+   * The vendor has NO scope parameter (Notion): what an app may do is configured on the vendor side (per integration).
+   * Scope verification is skipped ONLY for such apps; it stays mandatory whenever scopes exist (R8).
+   */
+  noScopes?: boolean;
   describe: Partial<Record<Access, string>>; // shown on the phone before approval
   maxLifeMs: number; // absolute session lifetime
   idleMs: number; // idle timeout (human activity only)
@@ -84,11 +89,27 @@ export const APPS: Record<AppId, AppDef> = {
     maxLifeMs: 30 * 60_000,
     idleMs: 5 * 60_000,
   },
+  notion: {
+    id: "notion",
+    vendor: "notion",
+    label: "Notion",
+    scopes: {},
+    noScopes: true,
+    // Two separate Notion integrations: "read" uses one that only has the "read content" capability, so Notion itself refuses writes.
+    describe: {
+      read: "Search and read the Notion pages you choose to share on the next screen. Nothing can be changed.",
+      write: "Search and read the Notion pages you choose to share, create new pages under them and add text to them. Cannot edit existing text, delete or move anything.",
+    },
+    maxLifeMs: 30 * 60_000,
+    idleMs: 5 * 60_000,
+  },
 };
 
 export const isApp = (x: unknown): x is AppId => typeof x === "string" && Object.hasOwn(APPS, x);
 export const isAccess = (x: unknown): x is Access => x === "read" || x === "write" || x === "stream";
 export const scopesFor = (app: AppId, access: Access) => APPS[app].scopes[access] ?? "";
+/** Can this app be unlocked at this access level? (noScopes apps have no scope string, so they are defined by `describe`.) */
+export const hasAccess = (app: AppId, access: Access) => (APPS[app].noScopes ? APPS[app].describe[access] !== undefined : !!scopesFor(app, access));
 export const scopeList = (s: string) => s.split(/[ ,]+/).filter(Boolean);
 
 /**
@@ -126,7 +147,7 @@ export function makeBundle(primary: BundleItem, also: unknown): BundleItem[] | n
   for (const i of list) {
     if (seen.has(i.app)) return null; // one entry per app
     seen.add(i.app);
-    if (i.access === "stream" || !scopesFor(i.app, i.access)) return null;
+    if (i.access === "stream" || !hasAccess(i.app, i.access)) return null;
     if (APPS[i.app].vendor !== "google") return null; // bundles: Google only (R7)
   }
   return list;

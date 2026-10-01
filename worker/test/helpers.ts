@@ -18,7 +18,7 @@ export class FakeKV implements KV {
 export function setup() {
   const kv = new FakeKV();
   const clock = { t: 1_000_000 };
-  const revoked: Array<{ app: AppId; token: string }> = [];
+  const revoked: Array<{ app: AppId; token: string; access?: Access }> = [];
   const hooks: Hooks = {
     // "sealing" for tests: reversible and visibly different from the plaintext
     seal: async (p, aad) => "sealed:" + aad + ":" + p,
@@ -27,7 +27,7 @@ export function setup() {
       if (!s.startsWith(pre)) throw new Error("aad mismatch");
       return s.slice(pre.length);
     },
-    revoke: (app, token) => { revoked.push({ app, token }); },
+    revoke: (app, token, access) => { revoked.push({ app, token, access }); },
     now: () => clock.t,
   };
   return { kv, clock, revoked, core: new StoreCore(kv, hooks) };

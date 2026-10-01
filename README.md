@@ -1,18 +1,19 @@
-# Sakkol Workspace (v3.1)
+# Sakkol Workspace (v4)
 
 A small personal workspace for **untrusted shared computers**. You unlock each app with your **trusted phone**; the shared browser never sees a password and never stores a login.
 
 | App | Access levels |
 |---|---|
 | Gmail | read-only, or read & write (send, reply, star, archive, trash) |
-| **Google Tasks (new in v3.1)** | read-only, or read & write (add, edit, complete; no delete) |
+| **Notion (new in v4)** | read-only (search and read pages you shared), or read & write (create pages, append text; no edit/delete) |
+| Google Tasks | read-only, or read & write (add, edit, complete; no delete) |
 | Outlook / Hotmail | read-only, or read & write (send, reply, flag, archive, delete = move to Deleted Items) |
 | Spotify | remote control of your own devices, or a web player in a separate tab |
 | Widgets | clock, countdown timer, quick links (all in memory) |
 
 **One sign-in for several Google apps:** tick "Also unlock Google Tasks" on the Gmail tile (or the reverse). One QR scan, one Google consent screen, one capability per app.
 
-Google Drive, Notion and Calendar are planned (see `docs/NEXT-STEPS-FOR-AI-AGENT.md`).
+Google Drive and Calendar are planned (see `docs/NEXT-STEPS-FOR-AI-AGENT.md`).
 
 ## How unlocking works
 
@@ -27,7 +28,15 @@ Shared browser  ──capability──▶  Relay (Cloudflare Worker + Durable Ob
      └── QR + typed code ── your phone ── OAuth consent (PKCE)
 ```
 
-## What v3.1 adds: Google Tasks and the Google bundle
+## What v4 adds: Notion
+
+- Search page titles, read pages as plain text (nested blocks on demand), and in write mode create a page under a page or append text at the end of a page. No editing or deleting.
+- **Two Notion connections** ("Read" with *read content* only, "Write" with read + insert) so **Notion itself** enforces read-only. The Relay also refuses writes for read sessions.
+- Notion has no scopes and no PKCE: the owner chooses the shared pages on Notion's own screen; the exception to PKCE is documented in `docs/SECURITY.md`.
+- Nothing is kept from Notion's token response except the access token (refresh token, workspace and owner info are dropped). Lock revokes the token at Notion.
+- Write limits: 10/min and 20 per session. Images, files and link targets are never shown.
+
+## What v3.1 added: Google Tasks and the Google bundle
 
 - **Google Tasks:** lists, open/completed tasks, add, edit (title, notes, due date), complete/reopen. Google's `tasks` scope could also delete; the Relay has **no delete route** and never sends `DELETE`.
 - **Bundle (Google apps only):** one QR scan unlocks Gmail + Tasks, each with its own access level (e.g. Gmail read-only, Tasks read & write). Off by default. The phone lists every app being granted. If any permission is unticked on Google's screen, the whole unlock fails.
@@ -73,6 +82,7 @@ Details, residual risks and the manual checklist: [`docs/SECURITY.md`](docs/SECU
 | `worker/src/core.ts` | Pure, unit-tested logic (link transactions, sessions, rate limits) |
 | `worker/src/outlook.ts` | Outlook routes (Graph) |
 | `worker/src/tasks.ts` | Google Tasks routes |
+| `worker/src/notion.ts` | Notion routes |
 | `web/src/apps/mail/` | Shared mail UI (list, conversation view, compose) |
 | `docs/` | `API.md`, `SECURITY.md`, roadmap and review notes |
 
@@ -87,6 +97,6 @@ The frontend build needs the repository variable `VITE_RELAY_URL` (public, no tr
 
 ## Set up
 
-Follow [`docs/SETUP-STEPS.md`](docs/SETUP-STEPS.md). Outlook is **Phase 6** (an Entra app registration, one secret, three Graph permissions). Google Tasks is **Phase 7** (enable one API, add two scopes; no new secret). Spotify web player: [`docs/SETUP-STEPS-v2.1.md`](docs/SETUP-STEPS-v2.1.md).
+Follow [`docs/SETUP-STEPS.md`](docs/SETUP-STEPS.md). Outlook is **Phase 6** (an Entra app registration, one secret, three Graph permissions). Google Tasks is **Phase 7** (enable one API, add two scopes; no new secret). Notion is **Phase 8** (two Notion connections, two secrets). Spotify web player: [`docs/SETUP-STEPS-v2.1.md`](docs/SETUP-STEPS-v2.1.md).
 
 When updating from a zip, delete everything except `.git` first so files removed in a new version don't linger.

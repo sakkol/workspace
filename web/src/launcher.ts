@@ -14,6 +14,7 @@ const MODES: Record<string, Mode[]> = {
   gmail: [{ id: "read", label: "Read only", access: "read" }, { id: "write", label: "Read & write", access: "write" }],
   outlook: [{ id: "read", label: "Read only", access: "read" }, { id: "write", label: "Read & write", access: "write" }],
   tasks: [{ id: "read", label: "Read only", access: "read" }, { id: "write", label: "Read & write", access: "write" }],
+  notion: [{ id: "read", label: "Read only", access: "read" }, { id: "write", label: "Read & write", access: "write" }],
   spotify: [
     ...(PLAYER_URL ? [{ id: "player", label: "Web player (opens a new tab)", open: PLAYER_URL }] : []),
     { id: "remote", label: "Remote control (plays on your phone or speaker)", access: "write" as Access },
@@ -22,7 +23,7 @@ const MODES: Record<string, Mode[]> = {
 // Google apps can be unlocked together with ONE sign-in. Off by default; the partner has its own access level (read-only by default).
 const PARTNER: Record<string, AppId> = { gmail: "tasks", tasks: "gmail" };
 const bundle: Record<string, { on: boolean; access: Access }> = { gmail: { on: false, access: "read" }, tasks: { on: false, access: "read" } };
-const choice: Record<string, string> = { gmail: "read", outlook: "read", tasks: "read", spotify: PLAYER_URL ? "player" : "remote" }; // least privilege by default
+const choice: Record<string, string> = { gmail: "read", outlook: "read", tasks: "read", notion: "read", spotify: PLAYER_URL ? "player" : "remote" }; // least privilege by default
 
 export function launcher(root: HTMLElement) {
   const notice = takeNotice();

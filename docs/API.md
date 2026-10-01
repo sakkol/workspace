@@ -8,7 +8,7 @@ Errors look like `{ "error": "code" }`.
 
 | Method & path | Caller | Notes |
 |---|---|---|
-| `POST /link/start` `{app, access, claimHash, also?}` | shared computer | `app` ∈ `gmail`,`tasks`,`outlook`,`spotify`; **`also`** (optional, Google apps only) = `[{app, access}]`, e.g. `[{"app":"tasks","access":"read"}]`: one Google sign-in unlocks several apps, each with its own access level. Max 3 apps, no duplicates, `stream` not allowed, Outlook/Spotify never; otherwise 400 `bad_request`; `access` ∈ `read`,`write` (Spotify: `write` = remote control) or `stream` (Spotify web player: only from `PLAYER_ORIGIN`; everything else only from `FRONTEND_ORIGIN`, else 403 `wrong_origin`; 503 `player_not_configured` / `player_not_isolated`); `claimHash` = base64url SHA-256 of a 32-byte secret only the browser knows. Returns `{id, code, ttlMs}`. 503 `app_not_configured` if the vendor secrets are not set. |
+| `POST /link/start` `{app, access, claimHash, also?}` | shared computer | `app` ∈ `gmail`,`tasks`,`outlook`,`notion`,`spotify`; **`also`** (optional, Google apps only) = `[{app, access}]`, e.g. `[{"app":"tasks","access":"read"}]`: one Google sign-in unlocks several apps, each with its own access level. Max 3 apps, no duplicates, `stream` not allowed, Outlook/Spotify never; otherwise 400 `bad_request`; `access` ∈ `read`,`write` (Spotify: `write` = remote control) or `stream` (Spotify web player: only from `PLAYER_ORIGIN`; everything else only from `FRONTEND_ORIGIN`, else 403 `wrong_origin`; 503 `player_not_configured` / `player_not_isolated`); `claimHash` = base64url SHA-256 of a 32-byte secret only the browser knows. Returns `{id, code, ttlMs}`. 503 `app_not_configured` if the vendor secrets are not set. |
 | `GET /link/status/:id` header `X-Claim-Secret` | shared computer | `{status}`: `pending` `approved` `expired` `consumed` `cancelled`. Wrong/missing secret looks like `expired`. |
 | `POST /link/claim/:id` header `X-Claim-Secret` | shared computer | One time. From the workspace: `{caps:{<app>:{cap,ttlMs,access}}, cap, ttlMs, app, access}` (`caps` has one entry per app; the top-level fields are the primary app). From the player origin (stream only): `{token, ttlMs, app, access}`: the Spotify token is returned once and the Relay keeps nothing. 409 otherwise. |
 | `GET /link/info/:id` | phone | `{app, access, vendor, label, describe, ctx{ua,city,country}, ageSec, ttlMs}`. **Never includes the code.** |
@@ -37,6 +37,20 @@ Errors look like `{ "error": "code" }`.
 | `POST /gmail/(messages\|threads)/:id/action` `{action}` | write | `read` `unread` `star` `unstar` `archive`. On a thread it applies to every message in it |
 | `POST /gmail/(messages\|threads)/:id/trash` / `untrash` | write | No permanent delete exists |
 | `POST /gmail/send` `{to[],cc[],subject,body,replyToId?}` | write | Max 10 recipients, 150-char subject, 50 000-char body, **10 sends per session**. MIME is built by the Relay. No Bcc, attachments, forwarding. |
+
+## Notion (Bearer capability of app `notion`) — v4
+
+Ids are lower-case dashed UUIDs (`^[0-9a-f]{8}-…-[0-9a-f]{12}$`), cursors are UUIDs. The `read` access level uses a different Notion integration than `write` (Notion itself blocks writes for `read`). Notion sends `Notion-Version: 2026-03-11`. Text only: images, files, embeds and bookmarks appear as a placeholder, never as a URL; links in text are not returned. **No route edits, deletes, archives or moves anything; `/users` is never called.**
+
+| Path | Access | Notes |
+|---|---|---|
+| `POST /notion/search` `{query?, cursor?}` | read | Title search over pages shared with the integration, newest edit first, 20 per page. Returns `{results:[{id,title,edited}], next}`. Empty query = recently edited pages. Trashed pages and non-pages are dropped |
+| `GET /notion/pages/:id?cursor=` | read | `{id, title, props:[{name,value}], blocks:[{id,type,text,hasChildren,checked?,language?}], next}`. `title`/`props` only on the first page of results (no `cursor`). 100 blocks per page; `props` = up to 25 simple property types as text |
+| `GET /notion/blocks/:id/children?cursor=` | read | Same block shape, for expanding toggles, lists, tables, columns |
+| `POST /notion/pages` `{parentId, title, text?}` | write | Creates a page **under a page** (`parentId`). Title 1–300 chars, one line. `text` ≤ 20 000 chars: blank line = new paragraph, paragraphs cut at 1900 chars, ≤ 100 blocks. Returns `{id,title}` (no URL) |
+| `POST /notion/blocks/:id/append` `{text}` | write | Appends plain paragraphs at the **end** of a page/block. Same text limits. Returns `{ok,added}` |
+
+Limits: 120 requests/min, 10 writes/min, **20 writes per session** (`write_limit`, counted after validation). Errors: `session_expired`, `notion_forbidden` (page not shared, or the integration lacks the capability), `not_found` (Notion gives the same answer for unshared pages), `notion_rate_limited` (+`Retry-After`), `notion_unavailable`, `notion_bad_request`, `bad_id`, `bad_cursor`, `bad_query`, `bad_title`, `bad_text`, `too_many_blocks`, `read_only`.
 
 ## Google Tasks (Bearer capability of app `tasks`) — v3.1
 
@@ -82,7 +96,7 @@ Error codes worth handling: `session_expired` (401), `read_only` (403), `send_li
 
 ## `GET /health`
 
-`{ok, configured:{tokenKey, google, microsoft, spotify, player}}` (booleans only, no values). Use it to check your setup.
+`{ok, configured:{tokenKey, google, microsoft, notion, notionWrite, spotify, player}}` (booleans only, no values). Use it to check your setup.
 
 
 ## Origins (v2.1)

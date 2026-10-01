@@ -1,6 +1,6 @@
 // In-memory application state. NOTHING here is ever written to cookies, localStorage, sessionStorage or IndexedDB.
 
-export type AppId = "gmail" | "spotify" | "outlook" | "tasks";
+export type AppId = "gmail" | "spotify" | "outlook" | "tasks" | "notion";
 export type Access = "read" | "write";
 export interface Cap { cap: string; expAt: number; access: Access }
 
@@ -37,7 +37,7 @@ let notice = "";
 export const setNotice = (s: string) => { notice = s; };
 export const takeNotice = () => { const n = notice; notice = ""; return n; };
 
-export const APP_NAMES: Record<AppId, string> = { gmail: "Gmail", spotify: "Spotify", outlook: "Outlook", tasks: "Google Tasks" };
+export const APP_NAMES: Record<AppId, string> = { gmail: "Gmail", spotify: "Spotify", outlook: "Outlook", tasks: "Google Tasks", notion: "Notion" };
 
 /** Forget an app's capability and data locally. */
 export function dropApp(app: AppId, why?: string) {

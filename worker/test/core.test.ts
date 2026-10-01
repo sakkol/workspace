@@ -141,7 +141,7 @@ describe("sessions", () => {
     const { cap } = (await s.core.claim(a.id, a.secret))!;
     s.clock.t += 5 * 60_000 + 1;
     expect(await s.core.auth(cap, "gmail")).toBeNull();
-    expect(s.revoked).toEqual([{ app: "gmail", token: "TOKEN-gmail" }]);
+    expect(s.revoked).toMatchObject([{ app: "gmail", token: "TOKEN-gmail" }]);
   });
 
   it("a capability only works for its own app", async () => {
@@ -158,7 +158,7 @@ describe("sessions", () => {
     await s.core.revoke(gc.cap);
     expect(await s.core.auth(gc.cap, "gmail")).toBeNull();
     expect(await s.core.auth(sc.cap, "spotify")).toMatchObject({ token: "TOKEN-spotify" });
-    expect(s.revoked).toEqual([{ app: "gmail", token: "TOKEN-gmail" }]);
+    expect(s.revoked).toMatchObject([{ app: "gmail", token: "TOKEN-gmail" }]);
   });
 
   it("passive polling does not extend the idle timer", async () => {
@@ -199,7 +199,7 @@ describe("sessions", () => {
     s.clock.t += 31 * 60_000;
     await s.core.alarm();
     expect(s.kv.m.size).toBe(0);
-    expect(s.revoked).toEqual([{ app: "gmail", token: "TOKEN-gmail" }]);
+    expect(s.revoked).toMatchObject([{ app: "gmail", token: "TOKEN-gmail" }]);
   });
 });
 

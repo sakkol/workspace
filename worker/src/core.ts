@@ -1,7 +1,7 @@
 // All single-use / expiry / limit logic lives here, with NO Cloudflare imports, so it can be unit-tested in Node.
 // The Durable Object (store.ts) is a thin wrapper: one DO instance = atomic, single-threaded state.
 
-import { APPS, AppId, Access, BundleItem, VendorId, bundleScopes, isAccess, isApp, makeBundle, scopesFor, scopesGranted } from "./apps";
+import { APPS, AppId, Access, BundleItem, VendorId, bundleScopes, hasAccess, isAccess, isApp, makeBundle, scopesGranted } from "./apps";
 import { rnd, sha, timingSafeEqual } from "./security";
 
 export const TX_TTL = 150_000; // link transaction lifetime: 2.5 min
@@ -22,7 +22,7 @@ export interface Hooks {
   seal(plain: string, aad: string): Promise<string>;
   open(sealed: string, aad: string): Promise<string>;
   /** Best-effort revocation at the vendor. Must not throw and must never log the token. */
-  revoke(app: AppId, token: string): void;
+  revoke(app: AppId, token: string, access: Access): void; // access: some vendors (Notion) use a different client per access level
   now?: () => number;
 }
 
@@ -71,7 +71,7 @@ export class StoreCore {
 
   // ---------------- link transactions ----------------
   async newTx(app: unknown, access: unknown, claimHash: unknown, ctx: Partial<TxCtx>, also?: unknown) {
-    if (!isApp(app) || !isAccess(access) || !scopesFor(app, access)) return { error: "bad_request" as const };
+    if (!isApp(app) || !isAccess(access) || !hasAccess(app, access)) return { error: "bad_request" as const };
     const bundle = makeBundle({ app, access }, also);
     if (!bundle) return { error: "bad_request" as const };
     if (typeof claimHash !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(claimHash)) return { error: "bad_request" as const };
@@ -146,9 +146,9 @@ export class StoreCore {
     const t = await this.tx(id);
     if (!t || t.status !== "exchanging") return "state";
     // Bundle: EVERY scope of EVERY app must be granted, otherwise the whole transaction fails (no partial unlock).
-    if (!scopesGranted(APPS[t.app].vendor, bundleScopes(appsOf(t)), r.scope)) {
+    if (!APPS[t.app].noScopes && !scopesGranted(APPS[t.app].vendor, bundleScopes(appsOf(t)), r.scope)) { // noScopes vendors (Notion) have no scopes to verify
       t.status = "cancelled"; await this.save(id, t);
-      this.hooks.revoke(t.app, r.token); // do not keep a token that does less than requested
+      this.hooks.revoke(t.app, r.token, t.access); // do not keep a token that does less than requested
       return "scope";
     }
     t.token = await this.hooks.seal(r.token, "t:" + id);
@@ -238,7 +238,7 @@ export class StoreCore {
       if (sibs.some(([, v]) => !v.revoked && !this.expired(v, now))) return;
       for (const [sk, v] of sibs) { v.revoked = true; await this.kv.put(sk, v); } // expired siblings must not revoke it a second time
     }
-    try { this.hooks.revoke(s.app, await this.hooks.open(s.token, k)); } catch { /* best effort */ }
+    try { this.hooks.revoke(s.app, await this.hooks.open(s.token, k), s.access); } catch { /* best effort */ }
   }
 
   /** Reserve one of the session's sends (Gmail or Outlook; the capability must belong to `app`). Counted before sending, so failed attempts cannot be retried forever. */

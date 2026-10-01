@@ -68,6 +68,9 @@ pre.quoted{color:var(--mut);border-top:1px dashed var(--line)!important}
 @media(prefers-reduced-motion:reduce){.chip.alarm,.card.alarm{animation:none}}
 
 .sub-choices{display:flex;flex-direction:column;margin:2px 0 0 22px}.grants{list-style:none;padding:0;margin:8px 0}.grants li{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:6px 0}
+.nb{padding:2px 0;overflow-wrap:anywhere}.nb.h1{font-size:1.3rem;font-weight:700;margin-top:10px}.nb.h2{font-size:1.15rem;font-weight:700;margin-top:8px}.nb.h3{font-weight:700}.nb.q{border-left:3px solid var(--line);padding-left:10px;color:var(--mut)}
+.nb.ph{color:var(--mut);font-style:italic}.nb pre{margin:0;white-space:pre-wrap;font:inherit}.nb.code pre{font-family:ui-monospace,monospace;background:var(--card);padding:8px;border-radius:6px;font-size:.88rem}.nk{margin-left:22px}.nprops{font-size:.88rem;color:var(--mut);margin:4px 0 10px}.nprops b{color:var(--fg);font-weight:600}
+.linkb{background:none;border:0;padding:0 4px;color:var(--acc);text-decoration:underline;cursor:pointer;font:inherit}
 .task{display:flex;gap:10px;align-items:flex-start;padding:8px 6px;border-bottom:1px solid var(--line)}.task.child{margin-left:28px}.task input[type=checkbox]{margin-top:5px;width:18px;height:18px}
 .task .tb{flex:1;min-width:0}.task .tt{font-weight:600;overflow-wrap:anywhere}.task.done .tt{text-decoration:line-through;color:var(--mut);font-weight:400}
 .task .tn{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.9rem;color:var(--mut);margin-top:2px}.due{font-size:.8rem;color:var(--mut);margin-left:6px}.due.over{color:var(--err);font-weight:600}

@@ -3,6 +3,7 @@ import { mountGmail } from "./gmail";
 import { mountOutlook } from "./outlook";
 import { mountSpotify } from "./spotify";
 import { mountTasks } from "./tasks";
+import { mountNotion } from "./notion";
 
 export interface Tile {
   id: string; name: string; icon: string; blurb: string;
@@ -16,7 +17,7 @@ export const TILES: Tile[] = [
   { id: "tasks", name: "Google Tasks", icon: "✅", blurb: "See, add and complete your tasks", status: "available" },
   { id: "spotify", name: "Spotify", icon: "🎵", blurb: "Play music on your devices", status: "available" },
   { id: "drive", name: "Google Drive", icon: "📁", blurb: "Files", status: "soon" },
-  { id: "notion", name: "Notion", icon: "📝", blurb: "Notes and docs", status: "soon" },
+  { id: "notion", name: "Notion", icon: "📝", blurb: "Search, read and add to your notes", status: "available" },
 ];
 
-export const MOUNT: Record<AppId, (root: HTMLElement) => void> = { gmail: mountGmail, outlook: mountOutlook, tasks: mountTasks, spotify: mountSpotify };
+export const MOUNT: Record<AppId, (root: HTMLElement) => void> = { gmail: mountGmail, outlook: mountOutlook, tasks: mountTasks, notion: mountNotion, spotify: mountSpotify };
